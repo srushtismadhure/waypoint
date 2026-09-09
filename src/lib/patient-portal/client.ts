@@ -1,12 +1,10 @@
 import type {
-  LupusSystemOverview,
-  NutritionGuidance,
   PatientAppointment,
   PatientCarePathway,
   PatientCareTeamMember,
+  PatientCopdOverview,
   PatientDashboardSummary,
   PatientDocument,
-  PatientFriendlyLabResult,
   PatientIdentity,
   PatientMedication,
   PatientMessageSummary,
@@ -24,15 +22,7 @@ export interface PortalBaseResponse {
 }
 
 export type PortalSummaryResponse = PortalBaseResponse & { dashboard: PatientDashboardSummary };
-export type PortalLupusResponse = PortalBaseResponse & { systems: LupusSystemOverview[] };
-export type PortalLabsResponse = PortalBaseResponse & { results: PatientFriendlyLabResult[] };
-export type PortalLabResponse = PortalBaseResponse & { result: PatientFriendlyLabResult };
-export type PortalNutritionResponse = PortalBaseResponse & {
-  guidance: NutritionGuidance[];
-  mealIdeas: Array<{ id: string; title: string }>;
-  carePlan: PatientCarePathway[];
-  careTeam: PatientCareTeamMember[];
-};
+export type PortalCopdResponse = PortalBaseResponse & { copd: PatientCopdOverview };
 export type PortalCarePlanResponse = PortalBaseResponse & { pathways: PatientCarePathway[] };
 export type PortalAppointmentsResponse = PortalBaseResponse & { appointments: PatientAppointment[] };
 export type PortalMedicationsResponse = PortalBaseResponse & { medications: PatientMedication[] };
@@ -55,10 +45,7 @@ async function portalRequest<T>(path: string, init?: { method?: string; body?: u
 }
 
 export function getPortalSummary() { return portalRequest<PortalSummaryResponse>("summary"); }
-export function getPortalLupus() { return portalRequest<PortalLupusResponse>("lupus"); }
-export function getPortalLabs() { return portalRequest<PortalLabsResponse>("labs"); }
-export function getPortalLab(resultId: string) { return portalRequest<PortalLabResponse>(`labs/${encodeURIComponent(resultId)}`); }
-export function getPortalNutrition() { return portalRequest<PortalNutritionResponse>("nutrition"); }
+export function getPortalCopd() { return portalRequest<PortalCopdResponse>("copd"); }
 export function getPortalCarePlan() { return portalRequest<PortalCarePlanResponse>("care-plan"); }
 export function getPortalAppointments() { return portalRequest<PortalAppointmentsResponse>("appointments"); }
 export function getPortalMedications() { return portalRequest<PortalMedicationsResponse>("medications"); }
@@ -72,10 +59,6 @@ export function requestAppointmentChange(appointmentId: string, requestType: str
 export function requestMedicationRefill(medicationRequestId: string, message?: string) {
   return portalRequest<{ ok: true; requestId: string }>("medications/refill-request", { method: "POST", body: { medicationRequestId, message } });
 }
-export function requestNutritionSupport(topic: string, message?: string) {
-  return portalRequest<{ ok: true; requestId: string }>("nutrition/request-support", { method: "POST", body: { topic, message } });
-}
 export function sendPortalMessage(category: string, subject: string, message: string) {
   return portalRequest<{ ok: true; messageId: string }>("messages", { method: "POST", body: { category, subject, message } });
 }
-
