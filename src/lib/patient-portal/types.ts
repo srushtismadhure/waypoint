@@ -30,11 +30,7 @@ export interface PatientAppointment {
 }
 
 export interface PatientCopdOverview {
-  diagnosis: {
-    label: string;
-    status: string;
-    onset?: string;
-  };
+  diagnosis: { label: string; status: string; onset?: string };
   respiratory: {
     spo2?: PatientRespiratoryMetric;
     respiratoryRate?: PatientRespiratoryMetric;
@@ -52,24 +48,10 @@ export interface PatientCopdOverview {
     count: number;
     recent: Array<{ id: string; label: string; date?: string; setting: string }>;
   };
-  homeHealth: {
-    status: string;
-    latestVisitDate?: string;
-    summary: string[];
-  };
-  pulmonaryRehab: {
-    status: string;
-    detail: string;
-  };
-  followUp: {
-    status: string;
-    detail: string;
-    nextAppointment?: PatientAppointment;
-  };
-  medicationCheck: {
-    status: string;
-    detail: string;
-  };
+  homeHealth: { status: string; latestVisitDate?: string; summary: string[] };
+  pulmonaryRehab: { status: string; detail: string };
+  followUp: { status: string; detail: string; nextAppointment?: PatientAppointment };
+  medicationCheck: { status: string; detail: string };
 }
 
 export interface PatientCarePathway {
@@ -143,21 +125,11 @@ export interface PatientNextStep {
 }
 
 export interface PatientDashboardSummary {
+  copd: PatientCopdOverview;
   today: PatientNextStep[];
-  breathing: {
-    spo2?: string;
-    dyspnea?: string;
-    oxygen?: string;
-    status: string;
-  };
-  homeHealth: {
-    status: string;
-    latestVisitDate?: string;
-  };
-  pulmonaryRehab: {
-    status: string;
-    detail: string;
-  };
+  breathing: { spo2?: string; dyspnea?: string; oxygen?: string; status: string };
+  homeHealth: { status: string; latestVisitDate?: string };
+  pulmonaryRehab: { status: string; detail: string };
   nextAppointment?: PatientAppointment;
   carePlan: { activeSteps: number; nextAction: string; coordinator: string };
   medications: { activeCount: number; attentionNote?: string };
@@ -174,6 +146,11 @@ export interface PatientPortalModel {
   careTeam: PatientCareTeamMember[];
   messages: PatientMessageSummary[];
   documents: PatientDocument[];
+  /** Temporary compatibility fields for legacy portal endpoints that are no longer routed by the COPD UI. */
+  lupusOverview: unknown[];
+  labs: Array<{ id: string }>;
+  nutrition: unknown[];
+  mealIdeas: unknown[];
   dataStatus: {
     lastUpdatedAt: string;
     incompleteSections: string[];
