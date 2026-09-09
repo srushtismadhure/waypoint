@@ -4,11 +4,8 @@ import { cn } from "@/lib/utils";
 export function PatientSubNav({ patientId }: { patientId: string }) {
   const items = [
     { to: `/patients/${patientId}`, label: "Overview", end: true },
-    { to: `/patients/${patientId}/renal-timeline`, label: "Renal Trends", end: true },
     { to: `/patients/${patientId}/medications`, label: "Medications", end: true },
-    { to: `/patients/${patientId}/care-coordination`, label: "Care Coordination", end: true },
-    { to: `/patients/${patientId}/notes-coding`, label: "Notes & Coding", end: true },
-    { to: `/patients/${patientId}/referrals`, label: "Referrals", end: true },
+    { to: `/patients/${patientId}/notes-coding`, label: "Clinical Notes", end: true },
     { to: `/patients/${patientId}/tasks`, label: "Tasks", end: true },
     { to: `/patients/${patientId}/fhir-evidence`, label: "FHIR Evidence", end: true },
   ];
