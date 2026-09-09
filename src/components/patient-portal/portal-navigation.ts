@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Activity, CalendarDays, CircleHelp, ClipboardList, FileText, FlaskConical, House, MessageCircle, Pill, Users, Utensils } from "lucide-react";
+import { CalendarDays, CircleHelp, ClipboardList, FileText, House, MessageCircle, Pill, Users, Wind } from "lucide-react";
 
 export interface PortalNavigationItem {
   to: string;
@@ -10,9 +10,7 @@ export interface PortalNavigationItem {
 
 export const PORTAL_NAVIGATION: PortalNavigationItem[] = [
   { to: "/portal", label: "Home", icon: House, end: true },
-  { to: "/portal/lupus", label: "My Lupus", icon: Activity },
-  { to: "/portal/labs", label: "Lab Results", icon: FlaskConical },
-  { to: "/portal/nutrition", label: "Nutrition", icon: Utensils },
+  { to: "/portal/copd", label: "Breathing & COPD", icon: Wind },
   { to: "/portal/care-plan", label: "My Care Plan", icon: ClipboardList },
   { to: "/portal/appointments", label: "Appointments", icon: CalendarDays },
   { to: "/portal/medications", label: "Medications", icon: Pill },
@@ -21,4 +19,3 @@ export const PORTAL_NAVIGATION: PortalNavigationItem[] = [
   { to: "/portal/documents", label: "Documents", icon: FileText },
   { to: "/portal/help", label: "Help", icon: CircleHelp },
 ];
-
