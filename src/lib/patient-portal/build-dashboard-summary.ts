@@ -51,6 +51,7 @@ export function buildDashboardSummary(input: {
   }
 
   return {
+    copd: input.copd,
     today: nextSteps.slice(0, 3),
     breathing: {
       spo2: input.copd.respiratory.spo2?.value,
@@ -60,10 +61,7 @@ export function buildDashboardSummary(input: {
         ? `Breathing compared with usual: ${input.copd.respiratory.breathingComparedWithBaseline.value}`
         : "Review the latest breathing measurements available in your record.",
     },
-    homeHealth: {
-      status: input.copd.homeHealth.status,
-      latestVisitDate: input.copd.homeHealth.latestVisitDate,
-    },
+    homeHealth: { status: input.copd.homeHealth.status, latestVisitDate: input.copd.homeHealth.latestVisitDate },
     pulmonaryRehab: input.copd.pulmonaryRehab,
     nextAppointment,
     carePlan: {
@@ -75,9 +73,6 @@ export function buildDashboardSummary(input: {
       activeCount: input.medications.filter(medication => medication.status === "active").length,
       attentionNote: input.copd.medicationCheck.status === "Medication issue documented" ? input.copd.medicationCheck.detail : undefined,
     },
-    messages: {
-      unreadCount: 0,
-      latestSubject: input.messages[0]?.subject,
-    },
+    messages: { unreadCount: 0, latestSubject: input.messages[0]?.subject },
   };
 }
