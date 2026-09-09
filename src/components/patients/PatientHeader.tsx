@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, FileText, MoreHorizontal, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { PatientFormDialog } from "@/components/patients/PatientFormDialog";
 import { DeactivatePatientDialog } from "@/components/patients/DeactivatePatientDialog";
-import { formatPatientAge, formatPatientName, isLupusNephritisCondition } from "@/lib/formatters";
+import { formatPatientAge, formatPatientName } from "@/lib/formatters";
 
 interface PatientHeaderProps {
   patient: fhir4.Patient;
@@ -17,28 +17,44 @@ interface PatientHeaderProps {
   onPatientUpdated: (patient: fhir4.Patient) => void;
 }
 
-export function PatientHeader({ patient, conditions, onCreateTask, onAddClinicalNote, onPatientUpdated }: PatientHeaderProps) {
+export function PatientHeader({ patient, onCreateTask, onAddClinicalNote, onPatientUpdated }: PatientHeaderProps) {
   const navigate = useNavigate();
   const [editOpen, setEditOpen] = useState(false);
   const [deactivateOpen, setDeactivateOpen] = useState(false);
+  const [smartMode, setSmartMode] = useState(false);
 
-  const hasLupusNephritis = conditions.some(isLupusNephritisCondition);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/smart/session", { credentials: "include", cache: "no-store" })
+      .then(response => (response.ok ? response.json() : null))
+      .then(body => {
+        if (!cancelled) setSmartMode(Boolean(body?.authenticated));
+      })
+      .catch(() => {
+        if (!cancelled) setSmartMode(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <Card className="mb-6 flex-row flex-wrap items-start justify-between gap-4 p-5">
       <div>
-        <Button variant="ghost" size="sm" className="mb-2 -ml-2 text-muted-foreground" onClick={() => navigate("/patients")}>
-          <ArrowLeft className="size-4" />
-          Back to patients
-        </Button>
+        {!smartMode && (
+          <Button variant="ghost" size="sm" className="mb-2 -ml-2 text-muted-foreground" onClick={() => navigate("/patients")}>
+            <ArrowLeft className="size-4" />
+            Back to patients
+          </Button>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-xl font-semibold text-foreground">{formatPatientName(patient)}</h2>
           {patient.active === false ? <Badge variant="neutral">Inactive</Badge> : <Badge variant="success">Active</Badge>}
-          {hasLupusNephritis && <Badge variant="purple">Lupus nephritis</Badge>}
+          {smartMode && <Badge variant="neutral">SMART patient</Badge>}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
           {patient.gender ?? "Unknown gender"} · {formatPatientAge(patient) ? `${formatPatientAge(patient)} years` : "Unknown age"} ·{" "}
-          {patient.birthDate ?? "Unknown birth date"} · Synthetic demo patient
+          {patient.birthDate ?? "Unknown birth date"}
         </p>
       </div>
 
@@ -53,32 +69,34 @@ export function PatientHeader({ patient, conditions, onCreateTask, onAddClinical
           <Plus className="size-4" />
           Create task
         </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="icon-sm">
-              <MoreHorizontal className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => setEditOpen(true)}>Edit patient</DropdownMenuItem>
-            <DropdownMenuItem variant="destructive" onClick={() => setDeactivateOpen(true)} disabled={patient.active === false}>
-              Deactivate patient
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled>Clinical trial matching (not configured)</DropdownMenuItem>
-            <DropdownMenuItem disabled>Transplant referral (not configured)</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {!smartMode && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon-sm">
+                <MoreHorizontal className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setEditOpen(true)}>Edit patient</DropdownMenuItem>
+              <DropdownMenuItem variant="destructive" onClick={() => setDeactivateOpen(true)} disabled={patient.active === false}>
+                Deactivate patient
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
 
-      <PatientFormDialog
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        mode="edit"
-        patient={patient}
-        onSaved={onPatientUpdated}
-      />
+      {!smartMode && (
+        <PatientFormDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          mode="edit"
+          patient={patient}
+          onSaved={onPatientUpdated}
+        />
+      )}
 
-      {patient.id && (
+      {!smartMode && patient.id && (
         <DeactivatePatientDialog
           open={deactivateOpen}
           onOpenChange={setDeactivateOpen}
