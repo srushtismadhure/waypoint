@@ -1,36 +1,24 @@
 import type {
   PatientAppointment,
   PatientCarePathway,
+  PatientCopdOverview,
   PatientDashboardSummary,
-  PatientFriendlyLabResult,
   PatientMedication,
   PatientMessageSummary,
   PatientNextStep,
 } from "./types.js";
 
-function formattedLab(lab: PatientFriendlyLabResult | undefined): string | undefined {
-  if (!lab || lab.value === null) return undefined;
-  return `${lab.value}${lab.unit ? ` ${lab.unit}` : ""}`;
-}
-
 export function buildDashboardSummary(input: {
-  labs: PatientFriendlyLabResult[];
+  copd: PatientCopdOverview;
   carePlan: PatientCarePathway[];
   appointments: PatientAppointment[];
   medications: PatientMedication[];
   messages: PatientMessageSummary[];
   coordinator: string;
-  lupusAreasMonitored: number;
-  now?: Date;
 }): PatientDashboardSummary {
-  const now = input.now ?? new Date();
-  const egfr = input.labs.find(lab => lab.plainLanguageName === "Estimated kidney filtering rate");
-  const creatinine = input.labs.find(lab => lab.plainLanguageName === "Creatinine");
-  const upcr = input.labs.find(lab => lab.plainLanguageName === "Urine protein-to-creatinine ratio");
   const upcoming = input.appointments.filter(appointment => !appointment.past && appointment.status !== "cancelled");
-  const nextAppointment = upcoming[0];
+  const nextAppointment = input.copd.followUp.nextAppointment ?? upcoming[0];
   const activePathways = input.carePlan.filter(pathway => !["completed", "closed", "declined"].includes(pathway.status));
-  const monitoringItems = input.medications.flatMap(medication => medication.monitoring).filter(item => item.status !== "current").length;
   const nextSteps: PatientNextStep[] = activePathways.slice(0, 3).map(pathway => ({
     id: `pathway-${pathway.id}`,
     title: pathway.nextStep,
@@ -40,33 +28,43 @@ export function buildDashboardSummary(input: {
     patientAction: pathway.patientAction,
     status: pathway.statusLabel,
   }));
-  if (nextSteps.length < 3) {
-    for (const lab of input.labs.filter(item => item.reviewStatus === "awaiting-review").slice(0, 3 - nextSteps.length)) {
-      nextSteps.push({
-        id: `lab-${lab.id}`,
-        title: `Review ${lab.plainLanguageName}`,
-        whyItMatters: lab.whatItChecks,
-        responsibleParty: "Care team",
-        status: lab.reviewStatusLabel,
-      });
-    }
+
+  if (nextSteps.length < 3 && input.copd.medicationCheck.status === "Medication issue documented") {
+    nextSteps.push({
+      id: "medication-check",
+      title: "Review your medication list",
+      whyItMatters: input.copd.medicationCheck.detail,
+      responsibleParty: "You and your care team",
+      patientAction: "Use Messages if the medication issue is still unresolved.",
+      status: "Needs review",
+    });
   }
-  const latestDate = [egfr?.date, creatinine?.date, upcr?.date].filter((value): value is string => Boolean(value)).sort().pop();
-  const completeKidneySet = Boolean(egfr && creatinine && upcr);
+  if (nextSteps.length < 3 && input.copd.pulmonaryRehab.status === "No active referral documented") {
+    nextSteps.push({
+      id: "pulmonary-rehab",
+      title: "Ask about pulmonary rehabilitation",
+      whyItMatters: "Pulmonary rehabilitation can be part of recovery and long-term COPD care after an exacerbation or hospitalization.",
+      responsibleParty: "You and your care team",
+      patientAction: "Ask whether pulmonary rehabilitation is appropriate for you.",
+      status: "Discuss with care team",
+    });
+  }
 
   return {
     today: nextSteps.slice(0, 3),
-    kidneyHealth: {
-      latestDate,
-      egfr: formattedLab(egfr),
-      creatinine: formattedLab(creatinine),
-      urineProtein: formattedLab(upcr),
-      status: completeKidneySet ? "Recent kidney results are available for review." : "Some kidney monitoring information is not available.",
+    breathing: {
+      spo2: input.copd.respiratory.spo2?.value,
+      dyspnea: input.copd.respiratory.dyspnea?.value,
+      oxygen: input.copd.respiratory.oxygen?.value,
+      status: input.copd.respiratory.breathingComparedWithBaseline?.value
+        ? `Breathing compared with usual: ${input.copd.respiratory.breathingComparedWithBaseline.value}`
+        : "Review the latest breathing measurements available in your record.",
     },
-    lupusOverview: {
-      areasMonitored: input.lupusAreasMonitored,
-      followUpStatus: activePathways.length > 0 ? "Follow-up steps are listed in your care plan." : "No next step is currently listed in the available care plan.",
+    homeHealth: {
+      status: input.copd.homeHealth.status,
+      latestVisitDate: input.copd.homeHealth.latestVisitDate,
     },
+    pulmonaryRehab: input.copd.pulmonaryRehab,
     nextAppointment,
     carePlan: {
       activeSteps: activePathways.length,
@@ -75,7 +73,7 @@ export function buildDashboardSummary(input: {
     },
     medications: {
       activeCount: input.medications.filter(medication => medication.status === "active").length,
-      monitoringItems,
+      attentionNote: input.copd.medicationCheck.status === "Medication issue documented" ? input.copd.medicationCheck.detail : undefined,
     },
     messages: {
       unreadCount: 0,
@@ -83,4 +81,3 @@ export function buildDashboardSummary(input: {
     },
   };
 }
-
