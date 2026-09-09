@@ -18,6 +18,8 @@ import {
 import { buildSessionCookie, createDemoSessionToken } from "../lib/auth.js";
 
 const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
+const FORWARDED_FHIR_HEADERS = ["if-match", "if-none-match", "if-modified-since", "prefer"];
+const RETURNED_FHIR_HEADERS = new Set(["content-type", "location", "content-location", "etag", "last-modified"]);
 
 function htmlError(title: string, detail: string, status = 400): Response {
   const safeTitle = title.replace(/[<>&]/g, "");
@@ -127,9 +129,10 @@ export async function handleSmartCallback(request: Request): Promise<Response> {
     const session = createSmartSession(pending.issuer, token as SmartTokenResponse);
     const destination = session.patientId ? `/patients/${encodeURIComponent(session.patientId)}` : "/patients";
 
-    // Temporary compatibility bridge: Waypoint's existing React shell still expects
-    // the demo clinician session. SMART FHIR access itself is kept in a separate,
-    // server-side session and does not expose the OAuth token to the browser.
+    // Compatibility bridge for the current UI shell: SMART provides the real
+    // EHR/FHIR authorization, while the existing role gate still expects a
+    // clinician session. Replace this bridge with fhirUser/PractitionerRole
+    // authorization when the app's identity layer is refactored.
     const demoClinicianToken = createDemoSessionToken("clinician");
 
     const headers = new Headers({
@@ -173,6 +176,60 @@ export async function handleSmartLogout(request: Request): Promise<Response> {
     { ok: true },
     { status: 200, headers: { "Set-Cookie": buildClearedSmartSessionCookie(), ...NO_STORE_HEADERS } },
   );
+}
+
+/**
+ * If a SMART session is active, proxy /fhir requests to the EHR issuer using
+ * the short-lived OAuth token. Returns null when this is a normal Medblocks
+ * demo request so the existing FHIR proxy can handle it unchanged.
+ */
+export async function maybeProxySmartFhirRequest(request: Request): Promise<Response | null> {
+  const session = getSmartSessionFromRequest(request);
+  if (!session) return null;
+
+  const incoming = new URL(request.url);
+  const subPath = incoming.pathname.replace(/^\/fhir/, "") || "/";
+  const upstream = new URL(`${session.issuer}${subPath}`);
+  upstream.search = incoming.search;
+
+  const headers = new Headers({
+    Authorization: `${session.tokenType} ${session.accessToken}`,
+    Accept: "application/fhir+json",
+  });
+
+  const hasBody = request.method !== "GET" && request.method !== "HEAD";
+  if (hasBody) {
+    headers.set("Content-Type", request.headers.get("content-type") || "application/fhir+json");
+  }
+  for (const name of FORWARDED_FHIR_HEADERS) {
+    const value = request.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+
+  try {
+    const upstreamResponse = await fetch(upstream, {
+      method: request.method,
+      headers,
+      body: hasBody ? request.body : undefined,
+      // @ts-expect-error Bun/undici requires duplex for streamed request bodies.
+      duplex: hasBody ? "half" : undefined,
+    });
+
+    const responseHeaders = new Headers({ "Cache-Control": "no-store" });
+    upstreamResponse.headers.forEach((value, key) => {
+      if (RETURNED_FHIR_HEADERS.has(key.toLowerCase())) responseHeaders.set(key, value);
+    });
+    return new Response(upstreamResponse.body, { status: upstreamResponse.status, headers: responseHeaders });
+  } catch (proxyError) {
+    console.error("SMART FHIR proxy failed:", proxyError instanceof Error ? proxyError.message : "unknown error");
+    return Response.json(
+      {
+        resourceType: "OperationOutcome",
+        issue: [{ severity: "error", code: "exception", diagnostics: "Waypoint could not reach the SMART FHIR server." }],
+      },
+      { status: 502, headers: { "Content-Type": "application/fhir+json", "Cache-Control": "no-store" } },
+    );
+  }
 }
 
 export async function handleSmartRequest(request: Request): Promise<Response> {
