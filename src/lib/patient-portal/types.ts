@@ -1,20 +1,3 @@
-export type PatientLabCategory =
-  | "kidney-function"
-  | "urine-protein"
-  | "lupus-activity"
-  | "blood-count"
-  | "electrolyte"
-  | "other";
-
-export type PatientLabTrend = "improving" | "worsening" | "stable" | "changing" | "insufficient-data" | "not-applicable";
-export type PatientLabStatus =
-  | "within-reported-range"
-  | "outside-reported-range"
-  | "awaiting-review"
-  | "reviewed"
-  | "range-unavailable"
-  | "insufficient-data";
-
 export interface PatientIdentity {
   firstName: string;
   displayName: string;
@@ -22,85 +5,12 @@ export interface PatientIdentity {
   synthetic: boolean;
 }
 
-export interface PatientFriendlyLabResult {
-  id: string;
-  fhirReference: string;
-  category: PatientLabCategory;
-  name: string;
-  plainLanguageName: string;
-  value: number | string | null;
-  unit: string | null;
-  date: string | null;
-  referenceRange: { low?: number; high?: number; text?: string } | null;
-  patientTarget: { low?: number; high?: number; text?: string; sourceReference?: string } | null;
-  trend: PatientLabTrend;
-  trendLabel: string;
-  status: PatientLabStatus;
-  statusLabel: string;
-  reviewStatus: "new" | "awaiting-review" | "reviewed" | "discussed" | "follow-up-ordered";
-  reviewStatusLabel: string;
-  whatItChecks: string;
-  whatItMayMean: string;
-  nextStep: string;
+export interface PatientRespiratoryMetric {
+  label: string;
+  value: string;
+  date?: string;
+  context?: string;
   source: string;
-  history: Array<{ id: string; value: number | string | null; unit: string | null; date: string | null }>;
-  reviewedAt?: string;
-  reviewedBy?: string;
-  preliminary: boolean;
-}
-
-export interface LupusSystemOverview {
-  id: string;
-  title: string;
-  status:
-    | "being-monitored"
-    | "active-issue"
-    | "no-current-issue-documented"
-    | "waiting-for-review"
-    | "insufficient-information";
-  statusLabel: string;
-  summary: string;
-  monitoredItems: string[];
-  latestInformation: string[];
-  nextStep: string;
-  questions: string[];
-}
-
-export type NutritionGuidanceStatus =
-  | "general-education"
-  | "suggested-for-discussion"
-  | "clinician-approved"
-  | "dietitian-approved"
-  | "waiting-for-review";
-
-export interface NutritionGuidance {
-  id: string;
-  category: "sodium" | "protein" | "potassium" | "phosphorus" | "fluids" | "balanced-meals" | "food-safety" | "other";
-  title: string;
-  recommendation: string;
-  whyItMayMatter: string;
-  status: NutritionGuidanceStatus;
-  statusLabel: string;
-  supportingReferences: string[];
-  reviewedBy?: string;
-  reviewedAt?: string;
-  safetyNote?: string;
-}
-
-export interface PatientCarePathway {
-  id: string;
-  title: string;
-  purpose: string;
-  status: string;
-  statusLabel: string;
-  nextStep: string;
-  responsibleParty: string;
-  patientAction?: string;
-  dueDate?: string;
-  appointment?: string;
-  destination?: string;
-  milestones: Array<{ label: string; completed: boolean }>;
-  barriers: string[];
 }
 
 export interface PatientAppointment {
@@ -117,6 +27,65 @@ export interface PatientAppointment {
   preparation: string[];
   pathway?: string;
   past: boolean;
+}
+
+export interface PatientCopdOverview {
+  diagnosis: {
+    label: string;
+    status: string;
+    onset?: string;
+  };
+  respiratory: {
+    spo2?: PatientRespiratoryMetric;
+    respiratoryRate?: PatientRespiratoryMetric;
+    dyspnea?: PatientRespiratoryMetric;
+    oxygen?: PatientRespiratoryMetric;
+    breathingComparedWithBaseline?: PatientRespiratoryMetric;
+  };
+  lungFunction: {
+    fev1Percent?: PatientRespiratoryMetric;
+    fev1Fvc?: PatientRespiratoryMetric;
+    airflowCategory?: string;
+  };
+  exacerbations: {
+    supported: boolean;
+    count: number;
+    recent: Array<{ id: string; label: string; date?: string; setting: string }>;
+  };
+  homeHealth: {
+    status: string;
+    latestVisitDate?: string;
+    summary: string[];
+  };
+  pulmonaryRehab: {
+    status: string;
+    detail: string;
+  };
+  followUp: {
+    status: string;
+    detail: string;
+    nextAppointment?: PatientAppointment;
+  };
+  medicationCheck: {
+    status: string;
+    detail: string;
+  };
+}
+
+export interface PatientCarePathway {
+  id: string;
+  title: string;
+  purpose: string;
+  status: string;
+  statusLabel: string;
+  nextStep: string;
+  responsibleParty: string;
+  patientAction?: string;
+  dueDate?: string;
+  appointment?: string;
+  destination?: string;
+  milestones: Array<{ label: string; completed: boolean }>;
+  barriers: string[];
 }
 
 export interface PatientMedication {
@@ -175,27 +144,30 @@ export interface PatientNextStep {
 
 export interface PatientDashboardSummary {
   today: PatientNextStep[];
-  kidneyHealth: {
-    latestDate?: string;
-    egfr?: string;
-    creatinine?: string;
-    urineProtein?: string;
+  breathing: {
+    spo2?: string;
+    dyspnea?: string;
+    oxygen?: string;
     status: string;
   };
-  lupusOverview: { areasMonitored: number; followUpStatus: string };
+  homeHealth: {
+    status: string;
+    latestVisitDate?: string;
+  };
+  pulmonaryRehab: {
+    status: string;
+    detail: string;
+  };
   nextAppointment?: PatientAppointment;
   carePlan: { activeSteps: number; nextAction: string; coordinator: string };
-  medications: { activeCount: number; monitoringItems: number };
+  medications: { activeCount: number; attentionNote?: string };
   messages: { unreadCount: number; latestSubject?: string };
 }
 
 export interface PatientPortalModel {
   patient: PatientIdentity;
   dashboard: PatientDashboardSummary;
-  lupusOverview: LupusSystemOverview[];
-  labs: PatientFriendlyLabResult[];
-  nutrition: NutritionGuidance[];
-  mealIdeas: Array<{ id: string; title: string }>;
+  copdOverview: PatientCopdOverview;
   carePlan: PatientCarePathway[];
   appointments: PatientAppointment[];
   medications: PatientMedication[];
@@ -213,11 +185,9 @@ export interface PatientPortalRawData {
   patient: fhir4.Patient;
   conditions: fhir4.Condition[];
   observations: fhir4.Observation[];
-  diagnosticReports: fhir4.DiagnosticReport[];
-  medicationState: import("../medication-types.js").MedicationPatientState;
-  careCoordination: import("../care-coordination/types.js").CareCoordinationPlan;
+  medicationRequests: fhir4.MedicationRequest[];
+  medicationStatements: fhir4.MedicationStatement[];
   serviceRequests: fhir4.ServiceRequest[];
-  tasks: fhir4.Task[];
   carePlans: fhir4.CarePlan[];
   goals: fhir4.Goal[];
   appointments: fhir4.Appointment[];
@@ -225,6 +195,6 @@ export interface PatientPortalRawData {
   careTeams: fhir4.CareTeam[];
   communications: fhir4.Communication[];
   documentReferences: fhir4.DocumentReference[];
-  nutritionOrders: fhir4.NutritionOrder[];
+  questionnaireResponses: fhir4.QuestionnaireResponse[];
   failedSections: string[];
 }
