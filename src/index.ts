@@ -1,7 +1,7 @@
 import { serve } from "bun";
 import index from "./index.html";
 import { handleRequest } from "./server/router";
-import { handleSmartRequest } from "./server/smart-handlers";
+import { handleSmartRequest, maybeProxySmartFhirRequest } from "./server/smart-handlers";
 
 const isProduction = process.env.NODE_ENV === "production";
 const port = Number.parseInt(process.env.PORT ?? "3000", 10);
@@ -20,6 +20,10 @@ function isBackendPath(pathname: string): boolean {
 async function dispatchBackendRequest(request: Request): Promise<Response> {
   const { pathname } = new URL(request.url);
   if (pathname === "/smart" || pathname.startsWith("/smart/")) return handleSmartRequest(request);
+  if (pathname === "/fhir" || pathname.startsWith("/fhir/")) {
+    const smartResponse = await maybeProxySmartFhirRequest(request);
+    if (smartResponse) return smartResponse;
+  }
   return handleRequest(request);
 }
 
@@ -42,7 +46,7 @@ const server = isProduction
   : serve({
       port,
       routes: {
-        "/fhir/*": handleRequest,
+        "/fhir/*": dispatchBackendRequest,
         "/api/*": handleRequest,
         "/cds-services": handleRequest,
         "/cds-services/*": handleRequest,
