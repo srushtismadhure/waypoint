@@ -3,14 +3,10 @@ import { buildDashboardSummary } from "./build-dashboard-summary.js";
 import { normalizeAppointments } from "./normalize-appointments.js";
 import { normalizeCarePlan } from "./normalize-care-plan.js";
 import { normalizeCareTeamForPortal } from "./normalize-care-team.js";
+import { normalizeCopdOverview } from "./normalize-copd.js";
 import { normalizeDocuments } from "./normalize-documents.js";
-import { normalizeLabs } from "./normalize-labs.js";
-import { normalizeLupusOverview } from "./normalize-lupus.js";
 import { normalizeMedications } from "./normalize-medications.js";
 import { normalizePatientMessages } from "./normalize-messages.js";
-import { buildNutritionGuidance } from "./nutrition/nutrition-guidance-rules.js";
-import { normalizeNutritionContext } from "./nutrition/normalize-nutrition-context.js";
-import { filterMealTemplates } from "./nutrition/meal-template-filter.js";
 import type { PatientPortalModel, PatientPortalRawData } from "./types.js";
 
 function isSynthetic(patient: fhir4.Patient): boolean {
@@ -20,51 +16,50 @@ function isSynthetic(patient: fhir4.Patient): boolean {
 export function buildPatientPortalModel(raw: PatientPortalRawData, now = new Date()): PatientPortalModel {
   const displayName = formatPatientName(raw.patient);
   const firstName = raw.patient.name?.[0]?.given?.[0] ?? displayName.split(" ")[0] ?? "there";
-  const labs = normalizeLabs(raw.observations);
-  const medications = normalizeMedications(raw.medicationState, now);
   const appointments = normalizeAppointments(raw.appointments, now);
-  const carePlan = normalizeCarePlan(raw.careCoordination);
-  const careTeam = normalizeCareTeamForPortal(raw.careCoordination);
+  const medications = normalizeMedications(raw.medicationRequests, raw.medicationStatements);
+  const carePlan = normalizeCarePlan(raw.carePlans, raw.serviceRequests);
+  const careTeam = normalizeCareTeamForPortal(raw.careTeams);
   const messages = normalizePatientMessages(raw.communications, raw.patient.id ?? "");
   const documents = normalizeDocuments(raw.documentReferences);
-  const lupusOverview = normalizeLupusOverview(raw.conditions, labs, medications.filter(item => item.status === "active").length);
-  const nutritionContext = normalizeNutritionContext({
+  const copdOverview = normalizeCopdOverview({
     conditions: raw.conditions,
     observations: raw.observations,
-    nutritionOrders: raw.nutritionOrders,
-    allergies: raw.medicationState.allergies.map(allergy => allergy.text),
+    encounters: raw.encounters,
+    serviceRequests: raw.serviceRequests,
+    appointments: raw.appointments,
+    medicationRequests: raw.medicationRequests,
+    medicationStatements: raw.medicationStatements,
   });
-  const nutrition = buildNutritionGuidance(nutritionContext);
+
   const lastUpdatedAt = [
     raw.patient.meta?.lastUpdated,
     ...raw.observations.map(item => item.meta?.lastUpdated ?? item.effectiveDateTime ?? item.issued),
-    ...raw.tasks.map(item => item.meta?.lastUpdated ?? item.authoredOn),
+    ...raw.encounters.map(item => item.meta?.lastUpdated ?? item.period?.end ?? item.period?.start),
+    ...raw.questionnaireResponses.map(item => item.meta?.lastUpdated ?? item.authored),
   ]
     .filter((value): value is string => Boolean(value))
     .sort()
     .pop() ?? now.toISOString();
+
   const incompleteSections: string[] = [];
-  if (!labs.some(item => item.category === "kidney-function")) incompleteSections.push("Kidney-function laboratory results");
-  if (!labs.some(item => item.category === "blood-count")) incompleteSections.push("Blood-count results");
+  if (copdOverview.diagnosis.label === "COPD diagnosis not available") incompleteSections.push("COPD diagnosis information");
+  if (!copdOverview.respiratory.spo2 && !copdOverview.respiratory.dyspnea && !copdOverview.respiratory.oxygen) incompleteSections.push("Recent breathing information");
+  if (medications.length === 0) incompleteSections.push("Medication list");
   if (careTeam.length === 0) incompleteSections.push("Care team");
   if (appointments.length === 0) incompleteSections.push("Appointments");
 
   return {
     patient: { firstName, displayName, synthetic: isSynthetic(raw.patient) },
     dashboard: buildDashboardSummary({
-      labs,
+      copd: copdOverview,
       carePlan,
       appointments,
       medications,
       messages,
-      coordinator: raw.careCoordination.assignedCoordinator,
-      lupusAreasMonitored: lupusOverview.filter(item => item.status !== "insufficient-information").length,
-      now,
+      coordinator: careTeam.find(member => /coordinator|case|nurse/i.test(member.role))?.name ?? "Care team",
     }),
-    lupusOverview,
-    labs,
-    nutrition,
-    mealIdeas: filterMealTemplates(nutritionContext.allergies),
+    copdOverview,
     carePlan,
     appointments,
     medications,
