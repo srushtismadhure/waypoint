@@ -1,5 +1,5 @@
 import { createFhirResource, readFhirResource, searchFhirResource, updateFhirResource } from "./fhir-server-client.js";
-import { formatMedicationText, isRenalDiagnosisCondition, referencesPatient } from "./formatters.js";
+import { formatMedicationText, referencesPatient } from "./formatters.js";
 import {
   categorizeMedicationText,
   MONITORING_REQUIREMENTS,
@@ -7,6 +7,9 @@ import {
   RULESET_VERSION,
   type MedicationCategoryGroup,
 } from "./medication-config.js";
+import { classifyCopdMedication } from "./copd-medication-catalog.js";
+import { COPD_FINDING_SYSTEM, hasCopdCondition, patientIdValid } from "./copd-cds";
+import { evaluateCopdPatient, resolveCopdIssue } from "./copd-cds-service";
 import { getLatestObservation, filterObservationsByLoinc } from "./fhir-observations.js";
 import type {
   AllergyView,
@@ -135,6 +138,7 @@ function buildRegimenItem(
 ): MedicationRegimenItem {
   const text = formatMedicationText(mr);
   const category = categorizeMedicationText(text);
+  const copd = classifyCopdMedication(text);
   const coding = mr.medicationCodeableConcept?.coding?.[0];
   const sortedDosages = sortedDosageInstructions(mr);
   const dosage = currentDosageInstruction(mr);
@@ -149,6 +153,10 @@ function buildRegimenItem(
     categoryId: category?.id,
     categoryLabel: category?.label,
     categoryGroup: category?.group ?? "other",
+    genericName: copd?.genericName,
+    brandName: copd?.brandName,
+    medicationClass: copd?.medicationClass,
+    therapyRole: copd?.therapyRole,
     status: mr.status,
     intent: mr.intent,
     dose: doseQuantity?.value !== undefined ? `${doseQuantity.value}${doseQuantity.unit ? ` ${doseQuantity.unit}` : ""}` : undefined,
@@ -165,6 +173,8 @@ function buildRegimenItem(
     monitoring: deriveMonitoringForCategory(category?.id, observations),
     priorPrescriptionId: mr.priorPrescription?.reference?.split("/").pop(),
     note: parseTaggedNote(mr.note, NOTE_TAG.clinicalNote),
+    reconciliationStatus: matchingStatement ? ((matchingStatement.status === "not-taken" || matchingStatement.status === "stopped") ? "needs-review" : "reconciled") : "not-reviewed",
+    discrepancyType: matchingStatement?.status === "not-taken" ? "Not taking / medication unavailable" : matchingStatement?.status === "stopped" ? "Patient reports stopped" : undefined,
   };
 }
 
@@ -321,7 +331,7 @@ export async function getPatientMedicationState(patient: fhir4.Patient, conditio
 
   return {
     patientId,
-    cohortMember: conditions.some(isRenalDiagnosisCondition),
+    cohortMember: conditions.some(hasCopdCondition),
     safetyCounts,
     regimenByGroup,
     inactiveOrders: inactiveItems,
@@ -534,9 +544,16 @@ export interface CreateMedicationStatementInput {
   doseText?: string;
   note?: string;
   actorDisplay: string;
+  reportedUse?: string;
 }
 
-export async function createMedicationStatement(input: CreateMedicationStatementInput): Promise<{ ok: true; id: string } | { ok: false; status: number; error: string }> {
+export async function createMedicationStatement(input: CreateMedicationStatementInput): Promise<{ ok: true; id: string; cdsWarning?: string } | { ok: false; status: number; error: string }> {
+  if (!patientIdValid(input.patientId)) return { ok: false, status: 400, error: "Invalid patient identity." };
+  if (input.reportedUse && !["taking", "different", "unavailable", "caregiver", "unsure", "not-taking"].includes(input.reportedUse)) return { ok: false, status: 400, error: "Invalid reported medication use." };
+  if (input.medicationRequestId) {
+    const order = await readFhirResource<fhir4.MedicationRequest>("MedicationRequest", input.medicationRequestId);
+    if (order.status !== 200 || order.body?.resourceType !== "MedicationRequest" || !referencesPatient(order.body.subject, input.patientId)) return { ok: false, status: 400, error: "Medication order does not belong to this patient." };
+  }
   const statement: fhir4.MedicationStatement = {
     resourceType: "MedicationStatement",
     status: input.status,
@@ -544,6 +561,7 @@ export async function createMedicationStatement(input: CreateMedicationStatement
     subject: { reference: `Patient/${input.patientId}` },
     dateAsserted: new Date().toISOString(),
     informationSource: { display: input.actorDisplay },
+    ...(input.reportedUse ? { extension: [{ url: "https://waypoint.example/fhir/StructureDefinition/reported-medication-use", valueCode: input.reportedUse }] } : {}),
     ...(input.doseText ? { dosage: [{ text: input.doseText }] } : {}),
     ...(input.note ? { note: [annotation(input.note, input.actorDisplay)] } : {}),
     ...(input.medicationRequestId ? { basedOn: [{ reference: `MedicationRequest/${input.medicationRequestId}` }] } : {}),
@@ -554,6 +572,8 @@ export async function createMedicationStatement(input: CreateMedicationStatement
     return { ok: false, status: result.status, error: "Unable to record medication reconciliation." };
   }
   await createProvenance(`MedicationStatement/${result.body.id}`, "Medication reconciliation documented", input.actorDisplay);
+  try { await evaluateCopdPatient(input.patientId, true); }
+  catch { return { ok: true, id: result.body.id!, cdsWarning: "Reconciliation was saved, but CDS synchronization is pending. Refresh COPD decision support to retry." }; }
   return { ok: true, id: result.body.id! };
 }
 
@@ -644,6 +664,11 @@ export interface ResolveDetectedIssueInput {
 export async function resolveDetectedIssue(input: ResolveDetectedIssueInput): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   const current = await readFhirResource<fhir4.DetectedIssue | fhir4.OperationOutcome>("DetectedIssue", input.id);
   if (current.status !== 200 || isOperationOutcome(current.body)) return { ok: false, status: current.status, error: "Detected issue not found." };
+  if (current.body.identifier?.some(identifier => identifier.system === COPD_FINDING_SYSTEM)) {
+    if (input.action !== "continue") return { ok: false, status: 400, error: "Document the COPD review with a reason. Medication changes require their separate prescribing workflow." };
+    try { await resolveCopdIssue(current.body, input.reason, input.actorDisplay); return { ok: true }; }
+    catch (error) { return { ok: false, status: 409, error: error instanceof Error ? error.message : "Unable to resolve COPD finding." }; }
+  }
 
   const actionLabels: Record<ResolveDetectedIssueInput["action"], string> = {
     modify: "Draft modified",

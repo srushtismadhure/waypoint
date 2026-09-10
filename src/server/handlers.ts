@@ -14,6 +14,7 @@ import {
   buildClearedSessionCookie,
   buildSessionCookie,
   createDemoSessionToken,
+  createEhrSessionToken,
   DEMO_USERS,
   forbiddenResponse,
   getSessionFromRequest,
@@ -24,6 +25,7 @@ import {
   unauthorizedResponse,
   verifySessionToken,
 } from "../lib/auth.js";
+import { resolveMedblocksLaunchContext, resourceId } from "../lib/medblocks-launch-context.js";
 import { buildPatientResource, mergePatientResource, validatePatientInput, type PatientFormInput } from "../lib/patient-input.js";
 import {
   createFhirResource,
@@ -53,7 +55,6 @@ import {
   cdsHooksResponse,
   persistDetectedIssuesFromEvaluation,
   CDS_SERVICES_DISCOVERY,
-  evaluateRenalPatientView,
   type CdsHooksRequestBody,
 } from "../lib/cds-hooks.js";
 import {
@@ -148,6 +149,7 @@ export function networkErrorResponse() {
  */
 export async function proxyFhirRequest(req: Request, fhirSubPath: string): Promise<Response> {
   if (!requireStaff(req)) return getSessionFromRequest(req) ? forbiddenResponse() : unauthorizedResponse();
+  if (getSessionFromRequest(req)?.mode === "ehr") return Response.json({ error: "EHR FHIR reads require the Medblocks downstream record adapter; the demo FHIR source is not used for an EHR session." }, { status: 501 });
 
   const fhirConfig = getFhirConfig();
   const incomingUrl = new URL(req.url);
@@ -225,7 +227,7 @@ export async function handleDemoLogin(req: Request): Promise<Response> {
     return Response.json(
       {
         authenticated: true,
-        user: { email: user.email, displayName: user.displayName, role, patientId: user.patientId },
+        user: { email: user.email, displayName: user.displayName, role, patientId: user.patientId, mode: "demo" },
         expiresAt: session?.exp,
       },
       { status: 200, headers: { "Set-Cookie": buildSessionCookie(token), "Cache-Control": "no-store" } },
@@ -261,6 +263,11 @@ export async function handleSession(req: Request): Promise<Response> {
         displayName: session.displayName,
         role: session.role,
         patientId: session.patientId,
+        mode: session.mode,
+        encounterId: session.encounterId,
+        fhirUser: session.fhirUser,
+        fhirSource: session.fhirSource,
+        fhirBaseUrl: session.fhirBaseUrl,
       },
       expiresAt: session.exp,
     },
@@ -268,16 +275,28 @@ export async function handleSession(req: Request): Promise<Response> {
   );
 }
 
+export async function handleMedblocksLaunch(req: Request): Promise<Response> {
+  const handle = new URL(req.url).searchParams.get("mb_launch");
+  if (!handle || handle.length > 512) return Response.json({ error: "A valid mb_launch handle is required." }, { status: 400 });
+  try {
+    const context = await resolveMedblocksLaunchContext(handle);
+    const token = createEhrSessionToken({ patientId: resourceId(context.patient, "Patient")!, encounterId: resourceId(context.encounter, "Encounter"), fhirUser: context.fhir_user ?? undefined, fhirSource: context.fhir_source ?? undefined, fhirBaseUrl: context.fhir_base_url ?? undefined });
+    return new Response(null, { status: 302, headers: { Location: `/patients/${encodeURIComponent(resourceId(context.patient, "Patient")!)}`, "Set-Cookie": buildSessionCookie(token), "Cache-Control": "no-store" } });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "The Medblocks launch could not be resolved." }, { status: 502, headers: { "Cache-Control": "no-store" } });
+  }
+}
+
 export async function handleExtendSession(req: Request): Promise<Response> {
   const session = getSessionFromRequest(req);
   if (!session) return unauthorizedResponse();
-  const token = createDemoSessionToken(session.role);
+  const token = session.mode === "ehr" ? createEhrSessionToken({ patientId: session.patientId!, encounterId: session.encounterId, fhirUser: session.fhirUser, fhirSource: session.fhirSource, fhirBaseUrl: session.fhirBaseUrl }) : createDemoSessionToken(session.role);
   const user = DEMO_USERS[session.role];
   const renewed = verifySessionToken(token);
   return Response.json(
     {
       authenticated: true,
-      user: { email: user.email, displayName: user.displayName, role: session.role, patientId: user.patientId },
+      user: { email: session.email, displayName: session.displayName, role: session.role, patientId: session.patientId, mode: session.mode, encounterId: session.encounterId, fhirUser: session.fhirUser, fhirSource: session.fhirSource, fhirBaseUrl: session.fhirBaseUrl },
       expiresAt: renewed?.exp,
     },
     { status: 200, headers: { "Set-Cookie": buildSessionCookie(token), "Cache-Control": "no-store" } },
@@ -474,6 +493,21 @@ export async function handleConfirmHomeHealthFinding(req: Request, visitId: stri
   if (!input.patientId || !input.kind || !input.value) return Response.json({ error: "patientId, kind, and value are required." }, { status: 400 });
   const target = `Patient/${input.patientId}`;
   if (input.kind === "medication-not-taking") {
+    // Re-confirming the same finding must not create another statement, which would fan out into a duplicate DetectedIssue and Task.
+    const existing = await searchFhirResource<fhir4.Bundle>("MedicationStatement", `patient=${encodeURIComponent(input.patientId)}&_count=100`);
+    const today = new Date().toISOString().slice(0, 10);
+    const duplicate = (existing.body?.entry ?? [])
+      .map(entry => entry.resource)
+      .filter((resource): resource is fhir4.MedicationStatement => resource?.resourceType === "MedicationStatement")
+      .find(
+        resource =>
+          resource.status === "not-taken" &&
+          resource.dateAsserted?.slice(0, 10) === today &&
+          (input.medicationRequestId
+            ? resource.basedOn?.some((reference: fhir4.Reference) => reference.reference === `MedicationRequest/${input.medicationRequestId}`) === true
+            : resource.medicationCodeableConcept?.text === input.value),
+      );
+    if (duplicate?.id) return Response.json({ ok: true, resourceType: "MedicationStatement", id: duplicate.id, visitId, deduplicated: true }, { status: 200 });
     const statement = await createMedicationStatement({ patientId: input.patientId, medicationRequestId: input.medicationRequestId, medicationText: input.value, status: "not-taken", note: `${input.reason ?? "Patient reported not taking"}. Evidence: ${input.evidenceText ?? ""}`, actorDisplay: session.displayName });
     if (!statement.ok) return Response.json({ error: statement.error }, { status: statement.status });
     return Response.json({ ok: true, resourceType: "MedicationStatement", id: statement.id, visitId }, { status: 201 });
@@ -761,7 +795,7 @@ export async function handleCreateMedicationStatement(req: Request, patientId: s
   const session = requireRole(req, "nurse", "clinician");
   if (!session) return getSessionFromRequest(req) ? forbiddenResponse() : unauthorizedResponse();
 
-  let body: { medicationRequestId?: string; medicationText?: string; status?: fhir4.MedicationStatement["status"]; doseText?: string; note?: string };
+  let body: { medicationRequestId?: string; medicationText?: string; status?: fhir4.MedicationStatement["status"]; doseText?: string; note?: string; reportedUse?: string };
   try {
     body = await req.json();
   } catch {
@@ -776,10 +810,11 @@ export async function handleCreateMedicationStatement(req: Request, patientId: s
     status: body.status,
     doseText: body.doseText,
     note: body.note,
+    reportedUse: body.reportedUse,
     actorDisplay: session.displayName,
   });
   if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
-  return Response.json({ id: result.id }, { status: 201 });
+  return Response.json({ id: result.id, cdsWarning: result.cdsWarning }, { status: 201 });
 }
 
 export async function handleCreateMedicationAssessment(req: Request, patientId: string): Promise<Response> {
@@ -1319,82 +1354,4 @@ export async function handlePortalReport(req: Request): Promise<Response> {
 
 export async function handleCdsDiscovery(): Promise<Response> {
   return Response.json(CDS_SERVICES_DISCOVERY, { status: 200 });
-}
-
-export async function handleCdsOrderSelect(req: Request): Promise<Response> {
-  if (!requireStaff(req)) return getSessionFromRequest(req) ? forbiddenResponse() : unauthorizedResponse();
-
-  let body: CdsHooksRequestBody;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  const patientId = body.context?.patientId;
-  const drafts = (body.context?.draftOrders?.entry ?? [])
-    .map(e => e.resource)
-    .filter((r): r is fhir4.MedicationRequest => !!r && r.resourceType === "MedicationRequest");
-  if (!patientId) return Response.json({ cards: [] }, { status: 200 });
-
-  const evaluation = await evaluateMedicationSafety(patientId, drafts);
-  return Response.json(cdsHooksResponse(evaluation), { status: 200 });
-}
-
-export async function handleCdsOrderSign(req: Request): Promise<Response> {
-  if (!requireStaff(req)) return getSessionFromRequest(req) ? forbiddenResponse() : unauthorizedResponse();
-
-  let body: CdsHooksRequestBody;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  const patientId = body.context?.patientId;
-  const drafts = (body.context?.draftOrders?.entry ?? [])
-    .map(e => e.resource)
-    .filter((r): r is fhir4.MedicationRequest => !!r && r.resourceType === "MedicationRequest");
-  if (!patientId) return Response.json({ cards: [] }, { status: 200 });
-
-  const evaluation = await evaluateMedicationSafety(patientId, drafts);
-  await persistDetectedIssuesFromEvaluation(patientId, evaluation);
-  return Response.json(cdsHooksResponse(evaluation), { status: 200 });
-}
-
-/**
- * luppedin-patient-view — intentionally does NOT require our internal session cookie.
- *
- * This is deliberate, not an oversight: real CDS Hooks services are invoked by an
- * external CDS Client (an EHR, or a public CDS Hooks sandbox for testing) that has
- * no way to hold our app's session cookie. Production CDS Hooks deployments secure
- * this boundary with the CDS Hooks spec's own client-authentication mechanism
- * (signed JWT / OAuth), which is out of scope for this demo. The data here is
- * synthetic demonstration data, consistent with the rest of this application.
- */
-export async function handleCdsPatientView(req: Request): Promise<Response> {
-  let body: { hook?: string; hookInstance?: string; context?: { patientId?: string; userId?: string } };
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  if (body.hook !== "patient-view") {
-    return Response.json({ error: "Unsupported hook. Expected 'patient-view'." }, { status: 400 });
-  }
-  if (!body.hookInstance) {
-    return Response.json({ error: "hookInstance is required." }, { status: 400 });
-  }
-  if (!body.context?.patientId) {
-    return Response.json({ error: "context.patientId is required." }, { status: 400 });
-  }
-
-  try {
-    const result = await evaluateRenalPatientView(body.context.patientId);
-    return Response.json({ cards: result.cards, debug: result.debug }, { status: 200 });
-  } catch (error) {
-    console.error("Renal CDS patient-view evaluation failed:", error instanceof Error ? error.message : "unknown error");
-    return Response.json({ error: "The renal CDS assessment could not be completed." }, { status: 502 });
-  }
 }

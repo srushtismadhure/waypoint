@@ -15,6 +15,11 @@ import { MedicationManagementPage } from "@/pages/MedicationManagementPage";
 import { MedicationsOverviewPage } from "@/pages/MedicationsOverviewPage";
 import { KidneyServicesPage } from "@/pages/KidneyServicesPage";
 import { NotesCodingPage } from "@/pages/NotesCodingPage";
+import { RespiratoryTrendsPage } from "@/pages/RespiratoryTrendsPage";
+import { ClinicianHomeHealthPage } from "@/pages/ClinicianHomeHealthPage";
+import { HomeHealthWorklistPage } from "@/pages/HomeHealthWorklistPage";
+import { PulmonaryRehabPage } from "@/pages/PulmonaryRehabPage";
+import { PatientTasksPage } from "@/pages/PatientTasksPage";
 import { RenalTrendsPage } from "@/pages/RenalTrendsPage";
 import { CareCoordinationPage } from "@/pages/CareCoordinationPage";
 import { SleSystemsReviewPage } from "@/pages/SleSystemsReviewPage";
@@ -174,6 +179,38 @@ export function App() {
           }
         />
         <Route
+          path="/patients/:patientId/respiratory-trends"
+          element={
+            <ProtectedRoute allowedRoles={[...STAFF_ROLES]}>
+              <RespiratoryTrendsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/home-health"
+          element={
+            <ProtectedRoute allowedRoles={["clinician"]}>
+              <HomeHealthWorklistPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/patients/:patientId/home-health"
+          element={
+            <ProtectedRoute allowedRoles={[...STAFF_ROLES]}>
+              <ClinicianHomeHealthPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/patients/:patientId/pulmonary-rehab"
+          element={
+            <ProtectedRoute allowedRoles={[...STAFF_ROLES]}>
+              <PulmonaryRehabPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/patients/:patientId/renal-timeline"
           element={
             <ProtectedRoute allowedRoles={[...STAFF_ROLES]}>
@@ -201,7 +238,7 @@ export function App() {
           path="/patients/:patientId/tasks"
           element={
             <ProtectedRoute allowedRoles={[...STAFF_ROLES]}>
-              <PatientDashboardPage />
+              <PatientTasksPage />
             </ProtectedRoute>
           }
         />

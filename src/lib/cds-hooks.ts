@@ -11,9 +11,7 @@ import { formatConditionText, referencesPatient } from "./formatters.js";
 import { categorizeMedicationText, MEDICATION_CDS_RULES, PREGNANCY_KEYWORDS, QT_PROLONGING_KEYWORDS, RULESET_VERSION } from "./medication-config.js";
 import { createDetectedIssue, MEDICATION_NONADHERENCE_KEYWORDS } from "./medications.js";
 import type { CdsHooksCard, CdsHooksResponse } from "./medication-types";
-import { normalizeRenalData, type NormalizedRenalData } from "./renal-cds-normalize.js";
-import { evaluateRenalRules, renalRuleConfig, type RenalRuleId } from "./renal-cds-rules.js";
-import { buildRenalCdsCards, type RenalCdsCard } from "./renal-cds-card.js";
+import { hasCopdCondition } from "./copd-cds";
 
 function medicationDisplayText(resource: { medicationCodeableConcept?: fhir4.CodeableConcept; medicationReference?: fhir4.Reference }): string {
   return (
@@ -24,27 +22,37 @@ function medicationDisplayText(resource: { medicationCodeableConcept?: fhir4.Cod
   );
 }
 
+/**
+ * Targeted prefetch. Every key below is consumed by at least one deterministic COPD rule; anything a
+ * rule only needs occasionally (Appointment, ServiceRequest, CarePlan) is fetched server-side instead.
+ * A prefetch key is only trusted when the CDS client supplies a complete, non-paged searchset bundle.
+ */
+export const COPD_PATIENT_VIEW_PREFETCH = {
+  patient: "Patient/{{context.patientId}}",
+  conditions: "Condition?patient={{context.patientId}}&_count=200",
+  encounters: "Encounter?patient={{context.patientId}}&_count=200",
+  observations: "Observation?patient={{context.patientId}}&_count=200",
+  medicationRequests: "MedicationRequest?patient={{context.patientId}}&_count=200",
+  medicationStatements: "MedicationStatement?patient={{context.patientId}}&_count=200",
+  questionnaireResponses: "QuestionnaireResponse?patient={{context.patientId}}&_count=200",
+  detectedIssues: "DetectedIssue?patient={{context.patientId}}&_count=200",
+  tasks: "Task?patient={{context.patientId}}&_count=200",
+} as const;
+
+const MEDICATION_ORDER_DESCRIPTION = "Surfaces an unresolved COPD medication reconciliation discrepancy for a medication being ordered. Interaction and dose checking stays disabled until an institution-validated medication safety source is configured.";
+
 export const CDS_SERVICES_DISCOVERY = {
   services: [
     {
-      hook: "order-select",
-      id: "luppedin-medication-order-select",
-      title: "LuppedIn medication safety (order-select)",
-      description: "Early informational review of a draft medication order for lupus-nephritis medication safety.",
-    },
-    {
-      hook: "order-sign",
-      id: "luppedin-medication-order-sign",
-      title: "LuppedIn medication safety (order-sign)",
-      description: "Primary medication-safety review run when the draft order has complete dose, route, and frequency information.",
-    },
-    {
-      id: "luppedin-patient-view",
+      id: "waypoint-patient-view",
       hook: "patient-view",
-      title: "LuppedIn Renal Monitoring",
-      description: "Detects worsening renal trends and incomplete lupus nephritis follow-up.",
-      usageRequirements: "For clinician review using available lupus nephritis and renal monitoring data.",
+      title: "Waypoint COPD Care Transitions",
+      description: "Surfaces actionable COPD post-acute, medication, home-health, and care-transition findings.",
+      usageRequirements: "Deterministic rules over clinician-confirmed FHIR data. No numeric risk predictions and no prescribing recommendations.",
+      prefetch: COPD_PATIENT_VIEW_PREFETCH,
     },
+    { id: "waypoint-order-select", hook: "order-select", title: "Waypoint COPD medication order review", description: `${MEDICATION_ORDER_DESCRIPTION} Scoped to the medications currently selected by the clinician.` },
+    { id: "waypoint-order-sign", hook: "order-sign", title: "Waypoint COPD medication order review (pre-signature)", description: `${MEDICATION_ORDER_DESCRIPTION} Runs immediately before signature across every unresolved reconciliation discrepancy, not only the drafted medication.` },
   ],
 };
 
@@ -77,9 +85,12 @@ function extractDraftMedicationRequests(body: CdsHooksRequestBody): fhir4.Medica
 }
 
 /** The single rule-evaluation function used by both order-select/order-sign CDS Hooks AND the "Run Safety Review" REST endpoint. */
-export async function evaluateMedicationSafety(patientId: string, draftMedicationRequests: fhir4.MedicationRequest[]): Promise<MedicationSafetyEvaluation> {
+export async function evaluateMedicationSafety(patientId: string, draftMedicationRequests: fhir4.MedicationRequest[], options?: { profile: "copd" }): Promise<MedicationSafetyEvaluation> {
   const cards: CdsHooksCard[] = [];
   const evidence: EvaluationEvidence[] = [];
+
+  // This keyword-based demo ruleset was configured for a different condition and is not validated for COPD.
+  if (options?.profile === "copd") return { cards, evidence };
 
   if (!patientId || draftMedicationRequests.length === 0) {
     return { cards, evidence };
@@ -102,6 +113,7 @@ export async function evaluateMedicationSafety(patientId: string, draftMedicatio
   const statements = entries<fhir4.MedicationStatement>(msRes.body, "MedicationStatement").filter(r => referencesPatient(r.subject, patientId));
   const allergies = entries<fhir4.AllergyIntolerance>(allergyRes.body, "AllergyIntolerance").filter(r => referencesPatient(r.patient, patientId));
   const conditions = entries<fhir4.Condition>(conditionRes.body, "Condition").filter(r => referencesPatient(r.subject, patientId));
+  if (conditions.some(hasCopdCondition)) return { cards, evidence };
   const existingIssues = entries<fhir4.DetectedIssue>(diRes.body, "DetectedIssue").filter(r => referencesPatient(r.patient, patientId));
 
   const activeExisting = existingRequests.filter(r => r.status === "active");
@@ -116,7 +128,7 @@ export async function evaluateMedicationSafety(patientId: string, draftMedicatio
       summary: rule.summary,
       indicator,
       detail: `${rule.detail}\n\n${rule.disclaimer}`,
-      source: { label: "LuppedIn medication safety (demonstration)" },
+      source: { label: "Waypoint medication safety (demonstration)" },
       suggestions: rule.suggestedActions.map(label => ({ label })),
       links: implicatedReferences.map(ref => ({ label: `Evidence: ${ref}`, url: `/fhir/${ref}`, type: "absolute" as const })),
       selectionBehavior: "at-most-one",
@@ -214,54 +226,4 @@ export async function persistDetectedIssuesFromEvaluation(patientId: string, eva
 
 export function cdsHooksResponse(evaluation: MedicationSafetyEvaluation): CdsHooksResponse {
   return { cards: evaluation.cards };
-}
-
-// ---------------------------------------------------------------------------
-// luppedin-patient-view (renal monitoring, hook: "patient-view")
-// ---------------------------------------------------------------------------
-
-export interface RenalPatientViewResult {
-  cards: RenalCdsCard[];
-  debug: {
-    conditionCount: number;
-    observationCount: number;
-    taskCount: number;
-    normalized: NormalizedRenalData;
-    firedRuleIds: RenalRuleId[];
-    ruleVersion: string;
-  };
-}
-
-/** Retrieves the patient's FHIR data from Medblocks, normalizes it, and runs the deterministic renal rules. Pure business logic — no HTTP concerns. */
-export async function evaluateRenalPatientView(patientId: string): Promise<RenalPatientViewResult> {
-  const query = `patient=${encodeURIComponent(patientId)}`;
-  const [conditionRes, observationRes, taskRes] = await Promise.all([
-    searchFhirResource<fhir4.Bundle>("Condition", `${query}&_count=100`),
-    searchFhirResource<fhir4.Bundle>("Observation", `${query}&_sort=-date&_count=200`),
-    searchFhirResource<fhir4.Bundle>("Task", `${query}&_count=100`),
-  ]);
-
-  function entries<T extends { resourceType: string }>(bundle: fhir4.Bundle | undefined, resourceType: string): T[] {
-    return (bundle?.entry ?? []).map(e => e.resource).filter((r): r is T => !!r && r.resourceType === resourceType);
-  }
-
-  const conditions = entries<fhir4.Condition>(conditionRes.body, "Condition").filter(c => referencesPatient(c.subject, patientId));
-  const observations = entries<fhir4.Observation>(observationRes.body, "Observation").filter(o => referencesPatient(o.subject, patientId));
-  const tasks = entries<fhir4.Task>(taskRes.body, "Task").filter(t => (t.for ? referencesPatient(t.for, patientId) : false));
-
-  const normalized = normalizeRenalData(patientId, conditions, observations, tasks);
-  const findings = evaluateRenalRules(normalized);
-  const cards = buildRenalCdsCards(findings);
-
-  return {
-    cards,
-    debug: {
-      conditionCount: conditions.length,
-      observationCount: observations.length,
-      taskCount: tasks.length,
-      normalized,
-      firedRuleIds: findings.map(f => f.ruleId),
-      ruleVersion: renalRuleConfig.version,
-    },
-  };
 }

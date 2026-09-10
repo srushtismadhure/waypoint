@@ -11,7 +11,8 @@
     "import:kidney-services": "bun scripts/import-kidney-services.ts",
     "upgrade:madison-class-iv": "bun scripts/upgrade-madison-class-iv.ts",
     "seed:copd-demo": "bun scripts/seed-copd-demo-patients.ts",
-    "seed:maria-home-health": "bun scripts/seed-maria-home-health-visit.ts"
+    "seed:maria-home-health": "bun scripts/seed-maria-home-health-visit.ts",
+    "seed:respiratory-trends": "bun scripts/seed-copd-respiratory-trends.ts"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.8",
@@ -26,6 +27,7 @@
     "clsx": "^2.1.1",
     "csv-parse": "^7.0.1",
     "lucide-react": "^1",
+    "medblocks": "^1.0.0",
     "openai": "^7.12.1",
     "react": "^19",
     "react-dom": "^19",

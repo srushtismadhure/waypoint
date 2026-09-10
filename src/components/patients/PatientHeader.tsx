@@ -58,6 +58,9 @@ export function PatientHeader({ patient, conditions, onCreateTask, onAddClinical
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => setEditOpen(true)}>Edit patient</DropdownMenuItem>
+            <DropdownMenuItem disabled={!patient.id} onClick={() => patient.id && navigate(`/patients/${patient.id}/fhir-evidence`)}>
+              View FHIR Evidence
+            </DropdownMenuItem>
             <DropdownMenuItem variant="destructive" onClick={() => setDeactivateOpen(true)} disabled={patient.active === false}>
               Deactivate patient
             </DropdownMenuItem>

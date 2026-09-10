@@ -135,7 +135,7 @@ export function MedicationManagementPage() {
     );
   }
 
-  const { patient, conditions, observations, medicationState, timelineEvents } = data;
+  const { patient, conditions, medicationState, timelineEvents } = data;
   const allRegimenItems = [...Object.values(medicationState.regimenByGroup).flat(), ...medicationState.inactiveOrders];
 
   return (
@@ -153,8 +153,8 @@ export function MedicationManagementPage() {
       {!medicationState.cohortMember && (
         <Alert variant="warning" className="mb-4">
           <AlertDescription>
-            This patient does not have a documented lupus-nephritis or chronic kidney disease diagnosis in the current record. Medication data
-            below is still scoped to this patient only.
+            This patient does not have a documented COPD diagnosis in the current record. Medication data below is still scoped to this patient
+            only.
           </AlertDescription>
         </Alert>
       )}
@@ -176,7 +176,7 @@ export function MedicationManagementPage() {
       </div>
 
       <div className="mb-6">
-        <MedicationSafetyTimeline observations={observations} events={timelineEvents} />
+        <MedicationSafetyTimeline events={timelineEvents} />
       </div>
 
       <div className="mb-6 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-white p-4">

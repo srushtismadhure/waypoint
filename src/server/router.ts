@@ -5,6 +5,7 @@
  * only does URL/method matching and dispatch, so there is exactly one
  * implementation of every route, never two.
  */
+import { handleCopdHook, handleCopdPatientSupport } from "./copd-cds-handlers";
 import {
   handleClinicianWorklist,
   handleContactPatient,
@@ -14,6 +15,7 @@ import {
   handleDeactivatePatient,
   handleDeclineMntReferral,
   handleDemoLogin,
+  handleMedblocksLaunch,
   handleDocumentBarrier,
   handleGetMntState,
   handleLogout,
@@ -46,9 +48,6 @@ import {
   handleApproveSdohReferralDraft,
   handleCancelSdohReferralDraft,
   handleCdsDiscovery,
-  handleCdsOrderSelect,
-  handleCdsOrderSign,
-  handleCdsPatientView,
   handleConfirmPriorAuthEvidence,
   handleCreateClinicalNoteDraft,
   handleCreatePriorAuthTask,
@@ -97,6 +96,16 @@ function withCors(response: Response): Response {
   return new Response(response.body, { status: response.status, headers });
 }
 
+/** Discovery advertises the first id of each hook; the `waypoint-copd-*` ids stay routable for already-registered CDS clients. */
+const COPD_CDS_SERVICES = {
+  "waypoint-patient-view": "patient-view",
+  "waypoint-copd-patient-view": "patient-view",
+  "waypoint-order-select": "order-select",
+  "waypoint-copd-order-select": "order-select",
+  "waypoint-order-sign": "order-sign",
+  "waypoint-copd-order-sign": "order-sign",
+} as const;
+
 const MNT_REFERRAL_ACTIONS = {
   "send-for-signature": handleSendForSignature,
   sign: handleSignMntReferral,
@@ -112,6 +121,11 @@ export async function handleRequest(req: Request): Promise<Response> {
   const { pathname } = url;
   const method = req.method.toUpperCase();
 
+  if (pathname === "/launch" || pathname === "/api/launch") {
+    if (method !== "GET") return jsonError("Method not allowed", 405);
+    return handleMedblocksLaunch(req);
+  }
+
   // --- FHIR proxy: preserve the full path + query string, whatever prefix it arrived under ---
   if (pathname === "/fhir" || pathname.startsWith("/fhir/")) {
     return proxyFhirRequest(req, pathname.replace(/^\/fhir/, "") || "/");
@@ -122,7 +136,7 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   // --- CDS Hooks: public path per spec (not under /api), rewritten to /api/cds-services/* on Vercel.
   // CORS is enabled here (and only here) so an external CDS Hooks sandbox can call these endpoints
-  // cross-origin without our app's session cookie — see handleCdsPatientView for why that's safe. ---
+  // cross-origin without our app's session cookie — see handleCopdHook for the client authentication it requires. ---
   if (pathname === "/cds-services" || pathname === "/api/cds-services") {
     if (method === "OPTIONS") return withCors(new Response(null, { status: 204 }));
     if (method !== "GET") return withCors(jsonError("Method not allowed", 405));
@@ -132,9 +146,8 @@ export async function handleRequest(req: Request): Promise<Response> {
     if (method === "OPTIONS") return withCors(new Response(null, { status: 204 }));
     if (method !== "POST") return withCors(jsonError("Method not allowed", 405));
     const serviceId = pathname.split("/").filter(Boolean).pop();
-    if (serviceId === "luppedin-medication-order-select") return withCors(await handleCdsOrderSelect(req));
-    if (serviceId === "luppedin-medication-order-sign") return withCors(await handleCdsOrderSign(req));
-    if (serviceId === "luppedin-patient-view") return withCors(await handleCdsPatientView(req));
+    const hook = COPD_CDS_SERVICES[serviceId as keyof typeof COPD_CDS_SERVICES];
+    if (hook) return withCors(await handleCopdHook(req, hook));
     return withCors(jsonError("Not found", 404));
   }
 
@@ -143,6 +156,10 @@ export async function handleRequest(req: Request): Promise<Response> {
   }
 
   const segments = pathname.split("/").filter(Boolean).slice(1); // drop "api"
+  if (segments.length === 3 && segments[0] === "patients" && segments[2] === "copd-decision-support") {
+    if (method !== "GET" && method !== "POST") return jsonError("Method not allowed", 405);
+    return handleCopdPatientSupport(req, segments[1]!);
+  }
 
   // --- /api/health ---
   if (segments.length === 1 && segments[0] === "health") {

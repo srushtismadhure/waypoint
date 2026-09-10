@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { NavLink, useLocation } from "react-router-dom";
-import { Building2, ClipboardList, FileText, House, LayoutDashboard, LineChart, Pill, ScanSearch, Users } from "lucide-react";
+import { NavLink } from "react-router-dom";
+import { Building2, ClipboardList, FileText, House, LayoutDashboard, Pill, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth/AuthProvider";
 import logo from "@/assets/images/logo.png";
@@ -30,11 +30,10 @@ function useFhirConnectionStatus(): ConnectionStatus {
 export function AppSidebar() {
   const connectionStatus = useFhirConnectionStatus();
   const { user } = useAuth();
-  const location = useLocation();
-  const inPatientContext = /^\/patients\/[^/]+/.test(location.pathname);
 
   const dashboardHome = user?.role === "nurse" ? "/nurse" : "/clinician";
 
+  // Sidebar is cross-patient navigation only; anything scoped to one patient belongs in PatientSubNav.
   const navItems = user?.role === "nurse"
     ? [
         { to: "/nurse", label: "Dashboard", icon: LayoutDashboard, enabled: true, end: true },
@@ -47,11 +46,9 @@ export function AppSidebar() {
     : [
         { to: dashboardHome, label: "Dashboard", icon: LayoutDashboard, enabled: true, end: true },
         { to: "/patients", label: "Patients", icon: Users, enabled: true, end: false },
-        ...(user?.role === "clinician" ? [{ to: "/sle-systems-review", label: "COPD Review", icon: ScanSearch, enabled: true, end: false }] : []),
-        { to: "#", label: "Respiratory Trends", icon: LineChart, enabled: false },
-        { to: "/medications", label: "Medications", icon: Pill, enabled: true, end: false },
+        { to: "/medications", label: "Medication Safety", icon: Pill, enabled: true, end: false },
+        { to: "/home-health", label: "Home Health", icon: House, enabled: true, end: false },
         { to: "#", label: "Pulmonary Rehab", icon: Building2, enabled: false },
-        { to: "#", label: "Home Health Updates", icon: House, enabled: false },
         { to: "#", label: "Tasks", icon: FileText, enabled: false },
       ];
 
@@ -65,7 +62,7 @@ export function AppSidebar() {
           </div>
 
           <nav className="mt-2 flex flex-col gap-0.5 px-3">
-            {navItems.filter(item => !(inPatientContext && item.to === "/patients")).map(item =>
+            {navItems.map(item =>
               item.enabled ? (
                 <NavLink
                   key={item.label}
