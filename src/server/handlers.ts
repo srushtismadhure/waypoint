@@ -476,7 +476,7 @@ export async function handleExtractHomeHealthFindings(req: Request, visitId: str
   if (!parsed.ok) return parsed.response;
   if (parsed.body.targetQuestionnaire === "oasis-e2") return extractOasisCandidates(parsed.body, visitId, apiKey);
   if (!parsed.body.transcript?.trim()) return Response.json({ error: "A reviewed transcript is required." }, { status: 400 });
-  const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: process.env.OPENAI_MODEL ?? "gpt-4o-mini", input: [{ role: "system", content: "Extract candidate COPD home-health findings only. Never finalize clinical facts. Return JSON with findings, each having category, finding, evidenceText, and status candidate." }, { role: "user", content: parsed.body.transcript }], text: { format: { type: "json_object" } } }) });
+  const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: process.env.OPENAI_MODEL ?? "gpt-4o-mini", input: [{ role: "system", content: "Extract candidate COPD home-health findings only. Never finalize clinical facts. Return JSON with findings, each having category, finding, evidenceText, and status candidate. For a patient-reported medication also return label with the medication name and doseText with the reported dose and frequency." }, { role: "user", content: parsed.body.transcript }], text: { format: { type: "json_object" } } }) });
   const body = (await response.json().catch(() => null)) as { output_text?: string; error?: { message?: string } } | null;
   if (!response.ok || !body?.output_text) return Response.json({ error: body?.error?.message ?? `Extraction failed (${response.status}).` }, { status: 502 });
   let findings: unknown;
@@ -487,11 +487,17 @@ export async function handleExtractHomeHealthFindings(req: Request, visitId: str
 export async function handleConfirmHomeHealthFinding(req: Request, visitId: string): Promise<Response> {
   const session = requireRole(req, "nurse", "clinician");
   if (!session) return getSessionFromRequest(req) ? forbiddenResponse() : unauthorizedResponse();
-  const parsed = await readJsonBody<{ patientId?: string; kind?: "spo2" | "respiratory-rate" | "medication-not-taking"; value?: string; medicationRequestId?: string; reason?: string; evidenceText?: string }>(req);
+  const parsed = await readJsonBody<{ patientId?: string; kind?: "spo2" | "respiratory-rate" | "medication-not-taking" | "medication-taking"; value?: string; doseText?: string; medicationRequestId?: string; reason?: string; evidenceText?: string }>(req);
   if (!parsed.ok) return parsed.response;
   const input = parsed.body;
   if (!input.patientId || !input.kind || !input.value) return Response.json({ error: "patientId, kind, and value are required." }, { status: 400 });
   const target = `Patient/${input.patientId}`;
+  if (input.kind === "medication-taking") {
+    // A newly discovered home medication is patient-reported use, never a prescription.
+    const statement = await createMedicationStatement({ patientId: input.patientId, medicationText: input.value, status: "active", reportedUse: "taking", doseText: input.doseText, note: `${input.reason ?? "Patient-reported medication documented during a home-health visit"}. Evidence: ${input.evidenceText ?? ""}`, actorDisplay: session.displayName });
+    if (!statement.ok) return Response.json({ error: statement.error }, { status: statement.status });
+    return Response.json({ ok: true, resourceType: "MedicationStatement", id: statement.id, visitId }, { status: 201 });
+  }
   if (input.kind === "medication-not-taking") {
     // Re-confirming the same finding must not create another statement, which would fan out into a duplicate DetectedIssue and Task.
     const existing = await searchFhirResource<fhir4.Bundle>("MedicationStatement", `patient=${encodeURIComponent(input.patientId)}&_count=100`);

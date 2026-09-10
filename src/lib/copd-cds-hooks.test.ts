@@ -151,6 +151,37 @@ describe("patient-view rules", () => {
     expect(rehabCard.links[0]!.label).toBe("Review pulmonary rehab");
   });
 
+  test("nonselective beta-blocker in COPD is raised for review, cardioselective agents are not", () => {
+    const order = (id: string, text: string): fhir4.MedicationRequest => ({ resourceType: "MedicationRequest", id, status: "active", intent: "order", subject: { reference: "Patient/patient-a" }, medicationCodeableConcept: { text } });
+    const reported = (id: string, text: string): fhir4.MedicationStatement => ({ resourceType: "MedicationStatement", id, status: "active", subject: { reference: "Patient/patient-a" }, medicationCodeableConcept: { text }, informationSource: { display: "Home health nurse" }, dateAsserted: "2026-09-08T12:00:00Z" });
+
+    const cardioselective = fixture();
+    cardioselective.resources.push(order("metoprolol", "Metoprolol succinate 50 mg"));
+    expect(evaluateCopd(cardioselective).findings.some(finding => finding.ruleId === "nonselective-beta-blocker-copd-review")).toBe(false);
+
+    const nonselective = fixture();
+    nonselective.resources.push(reported("propranolol", "Propranolol 40 mg"), order("albuterol", "Albuterol 90 mcg inhaler"));
+    const finding = evaluateCopd(nonselective).findings.find(item => item.ruleId === "nonselective-beta-blocker-copd-review")!;
+    expect(finding.category).toBe("MEDICATION_SAFETY");
+    expect(finding.title).toBe("Medication requires COPD-specific review");
+    expect(finding.explanation).toContain("Propranolol");
+    expect(finding.explanation).toContain("Albuterol");
+    expect(finding.explanation).not.toMatch(/cannot be taken together|is contraindicated|discontinue|stop the/i);
+    expect(finding.explanation).toContain("not a contraindication");
+    expect(finding.persistent).toBe(true);
+
+    nonselective.config = { ...nonselective.config, betaBlockerReviewEnabled: false };
+    expect(evaluateCopd(nonselective).findings.some(item => item.ruleId === "nonselective-beta-blocker-copd-review")).toBe(false);
+  });
+
+  test("medication safety outranks reconciliation when both are open", () => {
+    const input = fixture();
+    input.resources.push(...medicationEvidence(), { resourceType: "MedicationStatement", id: "propranolol", status: "active", subject: { reference: "Patient/patient-a" }, medicationCodeableConcept: { text: "Propranolol 40 mg" }, informationSource: { display: "Home health nurse" }, dateAsserted: "2026-09-08T12:00:00Z" } as fhir4.MedicationStatement);
+    const cards = copdCards(evaluateCopd(input), "https://waypoint.example");
+    expect(cards[0]!.summary).toBe("Medication requires COPD-specific review");
+    expect(cards[0]!.links[0]!.label).toBe("Review medication reconciliation");
+  });
+
   test("a fully loaded patient is prioritized down to at most three non-overlapping cards", () => {
     const input = fixture();
     input.resources.push(hospitalization(), ...medicationEvidence(), homeHealthResponse("2026-09-08T11:00:00Z"), rescueSignal());

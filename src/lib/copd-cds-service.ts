@@ -37,7 +37,7 @@ export function copdConfig(): Partial<CopdConfig> {
     if (!Number.isInteger(value) || value < 1 || value > 365) throw new Error(`Invalid ${name}`);
     return value;
   }
-  return { schedulingAuthoritative: process.env.COPD_SCHEDULING_AUTHORITATIVE === "true", rehabilitationAuthoritative: process.env.COPD_REHAB_AUTHORITATIVE === "true", oxygenAuthoritative: process.env.COPD_OXYGEN_AUTHORITATIVE === "true", rehabReviewEnabled: process.env.COPD_REHAB_REVIEW_ENABLED !== "false", homeHealthReviewEnabled: process.env.COPD_HOME_HEALTH_REVIEW_ENABLED !== "false", rescueUseReviewEnabled: process.env.COPD_RESCUE_USE_REVIEW_ENABLED !== "false", recentDays: window("COPD_RECENT_DAYS", 90), signalDays: window("COPD_SIGNAL_DAYS", 30), followupWindowDays: window("COPD_FOLLOWUP_DAYS", 30) };
+  return { schedulingAuthoritative: process.env.COPD_SCHEDULING_AUTHORITATIVE === "true", rehabilitationAuthoritative: process.env.COPD_REHAB_AUTHORITATIVE === "true", oxygenAuthoritative: process.env.COPD_OXYGEN_AUTHORITATIVE === "true", rehabReviewEnabled: process.env.COPD_REHAB_REVIEW_ENABLED !== "false", homeHealthReviewEnabled: process.env.COPD_HOME_HEALTH_REVIEW_ENABLED !== "false", rescueUseReviewEnabled: process.env.COPD_RESCUE_USE_REVIEW_ENABLED !== "false", betaBlockerReviewEnabled: process.env.COPD_BETA_BLOCKER_REVIEW_ENABLED !== "false", recentDays: window("COPD_RECENT_DAYS", 90), signalDays: window("COPD_SIGNAL_DAYS", 30), followupWindowDays: window("COPD_FOLLOWUP_DAYS", 30) };
 }
 // Follow only same-store, same-resource search links. Partial/failed searches never prove absence.
 export async function loadCopdData(patientId: string, now = new Date().toISOString(), prefetch?: unknown): Promise<CopdInput> {

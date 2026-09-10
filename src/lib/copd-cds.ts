@@ -7,6 +7,13 @@ export const COPD_DEMO_SYSTEM = "https://waypoint.example/fhir/CodeSystem/copd-d
 export const COPD_RULE_VERSION = "2026-09-09.2";
 export const COPD_HOME_HEALTH_QUESTIONNAIRE = "https://waypoint.example/fhir/Questionnaire/copd-home-health-subset";
 export type CopdCategory = "MEDICATION_RECONCILIATION" | "MEDICATION_SAFETY" | "HOME_HEALTH_REVIEW" | "POST_DISCHARGE_FOLLOWUP" | "WORSENING_COPD_PATTERN" | "RESCUE_MEDICATION_USE" | "EXACERBATION_RISK" | "PULMONARY_REHAB_GAP" | "OXYGEN_REASSESSMENT" | "CARE_TRANSITION_GAP";
+
+/**
+ * Demonstration configuration, not a validated drug database. Only nonselective agents are listed:
+ * cardioselective beta-1 blockers are deliberately absent and must never be flagged by this rule.
+ */
+export const NONSELECTIVE_BETA_BLOCKERS = ["propranolol", "nadolol", "timolol", "pindolol", "sotalol"] as const;
+export const BETA_AGONIST_RESCUE_MEDICATIONS = ["albuterol", "salbutamol", "levalbuterol", "terbutaline"] as const;
 export interface CopdFinding {
   id: string;
   patientId: string;
@@ -33,12 +40,13 @@ export interface CopdConfig {
   rehabReviewEnabled: boolean;
   homeHealthReviewEnabled: boolean;
   rescueUseReviewEnabled: boolean;
+  betaBlockerReviewEnabled: boolean;
   schedulingAuthoritative: boolean;
   rehabilitationAuthoritative: boolean;
   oxygenAuthoritative: boolean;
 }
 // Deployment policy, not a validated predictive model. No medication changes are recommended.
-export const DEFAULT_COPD_CONFIG: CopdConfig = { recentDays: 90, signalDays: 30, followupWindowDays: 30, rehabReviewEnabled: true, homeHealthReviewEnabled: true, rescueUseReviewEnabled: true, schedulingAuthoritative: false, rehabilitationAuthoritative: false, oxygenAuthoritative: false };
+export const DEFAULT_COPD_CONFIG: CopdConfig = { recentDays: 90, signalDays: 30, followupWindowDays: 30, rehabReviewEnabled: true, homeHealthReviewEnabled: true, rescueUseReviewEnabled: true, betaBlockerReviewEnabled: true, schedulingAuthoritative: false, rehabilitationAuthoritative: false, oxygenAuthoritative: false };
 
 /** Card wording is fixed per rule. The deterministic engine decides whether a rule fires; nothing here is generated. */
 interface RulePresentation { title: string; detail: string; workflow: string; linkLabel: string }
@@ -47,6 +55,7 @@ export const COPD_RULE_PRESENTATION: Record<string, RulePresentation> = {
   "home-health-findings-review": { title: "New post-discharge home-health findings require review", detail: "Home-health findings have been documented after the patient's recent COPD transition. Review respiratory status, medications, and follow-up needs.", workflow: NEEDS_ATTENTION, linkLabel: "Open Waypoint" },
   "medication-reconciliation": { title: "COPD medication discrepancy requires review", detail: "The medication list and patient-reported use do not currently match.", workflow: "/medications", linkLabel: "Review medication reconciliation" },
   "unlisted-home-medication": { title: "COPD medication discrepancy requires review", detail: "A reported home medication is not matched to an active prescription in the available medication list.", workflow: "/medications", linkLabel: "Review medication reconciliation" },
+  "nonselective-beta-blocker-copd-review": { title: "Medication requires COPD-specific review", detail: "A nonselective beta-blocker is documented in a patient with COPD. Review the indication, respiratory status, and medication regimen.", workflow: "/medications", linkLabel: "Review medication reconciliation" },
   "increased-rescue-use": { title: "Increased rescue medication use reported", detail: "Recent patient-reported rescue medication use is higher than the documented baseline. Review symptoms and current COPD management.", workflow: NEEDS_ATTENTION, linkLabel: "Open Waypoint" },
   "worsening-pattern": { title: "Worsening COPD pattern identified", detail: "Confirmed respiratory findings changed after a recent COPD exacerbation. This does not diagnose a current exacerbation.", workflow: NEEDS_ATTENTION, linkLabel: "Open Waypoint" },
   "post-discharge-followup": { title: "COPD follow-up may need attention", detail: "No qualifying post-discharge follow-up is currently documented.", workflow: "/care-coordination", linkLabel: "Review care transitions" },
@@ -147,6 +156,13 @@ export function evaluateCopd(input: CopdInput): CopdResult {
     const latest = new Map<string, fhir4.MedicationStatement>();
     for (const statement of [...statements].sort((a, b) => (a.dateAsserted ?? "").localeCompare(b.dateAsserted ?? ""))) { const key = medicationKey(statement); if (key) latest.set(key, statement); }
     for (const statement of latest.values()) if (statement.status === "active" && !requests.some(order => medicationMatches(order, statement))) add("unlisted-home-medication", "MEDICATION_RECONCILIATION", [`Confirmed use of ${medicationName(statement)} is not matched to an active prescription in the available medication list.`], [statement]);
+
+    // Drug-disease review, not a contraindication: the presence of a nonselective agent in COPD is what a clinician is asked to look at.
+    if (config.betaBlockerReviewEnabled) {
+      const nonselective = [...requests, ...statements.filter(statement => statement.status === "active")].filter(resource => NONSELECTIVE_BETA_BLOCKERS.some(name => medicationName(resource).toLowerCase().includes(name)));
+      const rescue = [...requests, ...statements.filter(statement => statement.status === "active")].filter(resource => BETA_AGONIST_RESCUE_MEDICATIONS.some(name => medicationName(resource).toLowerCase().includes(name)));
+      if (nonselective.length) add("nonselective-beta-blocker-copd-review", "MEDICATION_SAFETY", [`${[...new Set(nonselective.map(medicationName))].join(", ")} is documented for a patient with COPD.`, ...(rescue.length ? [`Beta-agonist rescue therapy (${[...new Set(rescue.map(medicationName))].join(", ")}) is also documented.`] : []), "Review the indication, respiratory status, and medication regimen. This is not a contraindication and no medication change is recommended here."], [...nonselective, ...rescue]);
+    }
   } else result.insufficientData.push("Medication or issue history is incomplete; reconciliation CDS withheld.");
 
   const qrs = list<fhir4.QuestionnaireResponse>("QuestionnaireResponse").filter(item => item.questionnaire === COPD_HOME_HEALTH_QUESTIONNAIRE && ["completed", "amended"].includes(item.status) && !!item.author);
