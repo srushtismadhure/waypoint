@@ -75,18 +75,23 @@ function constantTimeEqual(a: string, b: string): boolean {
 }
 
 export interface SessionPayload {
+  mode: "demo" | "ehr";
   email: string;
   displayName: string;
   role: DemoRole;
   patientId?: string;
   environment: string;
   exp: number;
+  encounterId?: string;
+  fhirUser?: string;
+  fhirSource?: string;
+  fhirBaseUrl?: string;
 }
 
 /** Role is validated against `DEMO_ROLES` server-side — the client cannot request an arbitrary role. */
 export function createDemoSessionToken(role: DemoRole): string {
   const user = DEMO_USERS[role];
-  const payload: SessionPayload = { ...user, role, environment: DEMO_ENVIRONMENT, exp: Date.now() + SESSION_TTL_MS };
+  const payload: SessionPayload = { ...user, mode: "demo", role, environment: DEMO_ENVIRONMENT, exp: Date.now() + SESSION_TTL_MS };
   const encodedPayload = base64UrlEncode(JSON.stringify(payload));
   const signature = sign(encodedPayload);
   return `${encodedPayload}.${signature}`;
@@ -100,13 +105,19 @@ export function verifySessionToken(token: string | undefined | null): SessionPay
 
   try {
     const payload = JSON.parse(base64UrlDecode(encodedPayload)) as SessionPayload;
-    if (typeof payload.email !== "string" || typeof payload.exp !== "number" || !isDemoRole(payload.role)) return null;
+    if (!(["demo", "ehr"] as const).includes(payload.mode) || typeof payload.email !== "string" || typeof payload.exp !== "number" || !isDemoRole(payload.role)) return null;
     if (payload.role === "patient" && payload.patientId !== DEMO_USERS.patient.patientId) return null;
     if (Date.now() > payload.exp) return null;
     return payload;
   } catch {
     return null;
   }
+}
+
+export function createEhrSessionToken(input: { patientId: string; encounterId?: string; fhirUser?: string; fhirSource?: string; fhirBaseUrl?: string }): string {
+  const payload: SessionPayload = { mode: "ehr", role: "clinician", email: input.fhirUser ?? "ehr-clinician", displayName: "EHR Clinician", ...input, environment: "medblocks-ehr", exp: Date.now() + SESSION_TTL_MS };
+  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
+  return `${encodedPayload}.${sign(encodedPayload)}`;
 }
 
 export function parseCookies(req: Request): Record<string, string> {

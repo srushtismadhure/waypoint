@@ -7,6 +7,9 @@ function toPatientMedication(item: MedicationRegimenItem, now: Date): PatientMed
   return {
     id: item.id,
     name: item.medicationText,
+    genericName: item.genericName,
+    medicationClass: item.medicationClass,
+    therapyRole: item.therapyRole,
     status: item.status,
     dose: item.dose,
     route: item.route,
@@ -20,6 +23,8 @@ function toPatientMedication(item: MedicationRegimenItem, now: Date): PatientMed
       lastDate: requirement.lastDate,
     })),
     recentlyChanged,
+    reconciliationStatus: item.reconciliationStatus,
+    discrepancyType: item.discrepancyType,
   };
 }
 

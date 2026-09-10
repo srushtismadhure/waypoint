@@ -5,6 +5,7 @@
   "buildCommand": "bun run build.ts",
   "outputDirectory": "dist",
   "rewrites": [
+    { "source": "/launch", "destination": "/api/launch" },
     { "source": "/fhir/:path*", "destination": "/api/fhir/:path*" },
     { "source": "/cds-services", "destination": "/api/cds-services" },
     { "source": "/cds-services/:path*", "destination": "/api/cds-services/:path*" },

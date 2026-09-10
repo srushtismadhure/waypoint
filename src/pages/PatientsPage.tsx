@@ -11,6 +11,7 @@ import { AllPatientsTable } from "@/components/dashboard/AllPatientsTable";
 import { PatientFormDialog } from "@/components/patients/PatientFormDialog";
 import { DeactivatePatientDialog } from "@/components/patients/DeactivatePatientDialog";
 import { getClinicianWorklist } from "@/lib/worklist-client";
+import { useAuth } from "@/components/auth/AuthProvider";
 import type { ClinicianWorklistResponse } from "@/lib/worklist-types";
 
 type PatientFilter = "all" | "needs-review" | "open-tasks" | "insufficient-data";
@@ -32,6 +33,7 @@ const SORT_OPTIONS: { value: SortOption; label: string }[] = [
 
 export function PatientsPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [data, setData] = useState<ClinicianWorklistResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +49,7 @@ export function PatientsPage() {
   const [deactivateTarget, setDeactivateTarget] = useState<fhir4.Patient | null>(null);
 
   const load = useCallback(async () => {
+    if (user?.mode === "ehr") return;
     setLoading(true);
     setError(null);
     try {
@@ -57,11 +60,15 @@ export function PatientsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user?.mode]);
 
   useEffect(() => {
     load();
   }, [load, refreshKey]);
+
+  if (user?.mode === "ehr" && user.patientId) {
+    return <AppShell title="Current EHR Patient" subtitle="This patient was selected by the Medblocks clinician workflow."><Card><CardContent className="space-y-3 p-6"><p className="text-lg font-semibold">Patient/{user.patientId}</p><p className="text-sm text-[color:var(--muted-foreground)]">The Oracle patient context is preserved in the secure Waypoint session. Population search and the demo patient list are unavailable in this EHR session.</p><Button variant="outline" onClick={() => navigate(`/patients/${user.patientId}`)}>Open current patient</Button></CardContent></Card></AppShell>;
+  }
 
   const filteredAllPatients = useMemo(() => {
     if (!data) return [];

@@ -1,10 +1,15 @@
 export type DemoRole = "nurse" | "clinician" | "patient";
 
 export interface DemoUser {
+  mode?: "demo" | "ehr";
   email: string;
   displayName: string;
   role: DemoRole;
   patientId?: string;
+  encounterId?: string;
+  fhirUser?: string;
+  fhirSource?: string;
+  fhirBaseUrl?: string;
 }
 
 export interface SessionState {

@@ -42,6 +42,7 @@ export function MedicationRegimenCard({ item, canManageOrders, onHold, onStop, o
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <p className="text-sm font-semibold text-[color:var(--foreground)]">{item.medicationText}</p>
+            {item.genericName && <p className="mt-1 text-xs text-[color:var(--muted-foreground)]">{item.genericName} · {item.medicationClass} · {item.therapyRole}</p>}
             {item.medicationCode && (
               <p className="font-mono text-xs text-[color:var(--muted-foreground)]">
                 {item.medicationSystem ?? "code"}: {item.medicationCode}
@@ -89,6 +90,8 @@ export function MedicationRegimenCard({ item, canManageOrders, onHold, onStop, o
             <dd>{item.lastReconciliationDate ?? "Not available"}</dd>
           </div>
         </dl>
+
+        {item.reconciliationStatus && <div className="rounded-md bg-[var(--background)] px-3 py-2 text-xs"><p className="font-medium text-[color:var(--foreground)]">Reconciliation</p><p className="text-[color:var(--muted-foreground)]">{item.reconciliationStatus === "needs-review" ? item.discrepancyType ?? "Needs clinician review" : item.reconciliationStatus === "reconciled" ? "Patient-reported use reconciles with the order" : "Not yet reviewed"}</p></div>}
 
         <div className="rounded-md bg-[var(--background)] px-3 py-2 text-xs">
           <p className="font-medium text-[color:var(--foreground)]">Patient-reported use</p>

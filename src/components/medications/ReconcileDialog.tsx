@@ -24,6 +24,9 @@ interface ReconcileDialogProps {
 export function ReconcileDialog({ open, onOpenChange, patientId, target, onSaved }: ReconcileDialogProps) {
   const [status, setStatus] = useState<fhir4.MedicationStatement["status"]>("active");
   const [doseText, setDoseText] = useState("");
+  const [frequency, setFrequency] = useState("");
+  const [lastTaken, setLastTaken] = useState("");
+  const [source, setSource] = useState("Patient");
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -32,15 +35,20 @@ export function ReconcileDialog({ open, onOpenChange, patientId, target, onSaved
     if (!target || submitting) return;
     setSubmitting(true);
     try {
-      await createMedicationStatement(patientId, {
+      const result = await createMedicationStatement(patientId, {
         medicationRequestId: target.medicationRequestId,
         medicationText: target.medicationText,
-        status,
+        status: status === "unknown" ? "not-taken" : status === "stopped" || status === "on-hold" ? "active" : status,
+        reportedUse: ({ active: "taking", "not-taken": "not-taking", stopped: "different", unknown: "unavailable", intended: "unsure", "on-hold": "caregiver" } as Record<string, string>)[status],
         doseText: doseText.trim() || undefined,
-        note: note.trim() || undefined,
+        note: [note.trim(), frequency.trim() && `Reported frequency: ${frequency.trim()}`, lastTaken.trim() && `Last taken: ${lastTaken.trim()}`, `Source: ${source}`].filter(Boolean).join(". ") || undefined,
       });
       toast.success("Medication reconciliation documented.");
+      if (result.cdsWarning) toast.warning(result.cdsWarning);
       setDoseText("");
+      setFrequency("");
+      setLastTaken("");
+      setSource("Patient");
       setNote("");
       onSaved();
       onOpenChange(false);
@@ -67,10 +75,11 @@ export function ReconcileDialog({ open, onOpenChange, patientId, target, onSaved
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="active">Taking as prescribed</SelectItem>
-                <SelectItem value="stopped">Reports stopped</SelectItem>
-                <SelectItem value="not-taken">Reports not taken</SelectItem>
-                <SelectItem value="intended">Intends to take</SelectItem>
-                <SelectItem value="unknown">Unknown</SelectItem>
+                <SelectItem value="not-taken">Not taking</SelectItem>
+                <SelectItem value="stopped">Taking differently</SelectItem>
+                <SelectItem value="unknown">Ran out / medication unavailable</SelectItem>
+                <SelectItem value="intended">Unsure</SelectItem>
+                <SelectItem value="on-hold">Caregiver administers medication</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -79,7 +88,22 @@ export function ReconcileDialog({ open, onOpenChange, patientId, target, onSaved
             <Input id="reconcile-dose" value={doseText} onChange={e => setDoseText(e.target.value)} placeholder="e.g. 20 mg daily" disabled={submitting} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="reconcile-note">Note (e.g. refill or access barrier)</Label>
+            <Label htmlFor="reconcile-frequency">Reported frequency</Label>
+            <Input id="reconcile-frequency" value={frequency} onChange={e => setFrequency(e.target.value)} placeholder="e.g. twice daily" disabled={submitting} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="reconcile-last-taken">Last taken</Label>
+            <Input id="reconcile-last-taken" type="date" value={lastTaken} onChange={e => setLastTaken(e.target.value)} disabled={submitting} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="reconcile-source">Report source</Label>
+            <Select value={source} onValueChange={setSource} disabled={submitting}>
+              <SelectTrigger id="reconcile-source" className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="Patient">Patient</SelectItem><SelectItem value="Caregiver">Caregiver</SelectItem><SelectItem value="Medication bottle">Medication bottle</SelectItem><SelectItem value="Discharge list">Discharge list</SelectItem><SelectItem value="Other">Other</SelectItem></SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="reconcile-note">Reason or note</Label>
             <Textarea id="reconcile-note" value={note} onChange={e => setNote(e.target.value)} disabled={submitting} />
           </div>
           <DialogFooter>

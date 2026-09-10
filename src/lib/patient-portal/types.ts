@@ -130,6 +130,11 @@ export interface PatientMedication {
   monitoring: Array<{ label: string; status: string; lastDate?: string }>;
   recentlyChanged: boolean;
   refillStatus?: string;
+  genericName?: string;
+  medicationClass?: string;
+  therapyRole?: string;
+  reconciliationStatus?: "reconciled" | "needs-review" | "not-reviewed";
+  discrepancyType?: string;
 }
 
 export interface PatientCareTeamMember {

@@ -12,6 +12,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 function isBackendPath(pathname: string): boolean {
   return pathname === "/fhir" || pathname.startsWith("/fhir/")
     || pathname === "/api" || pathname.startsWith("/api/")
+    || pathname === "/launch"
     || pathname === "/cds-services" || pathname.startsWith("/cds-services/");
 }
 
@@ -34,6 +35,7 @@ const server = isProduction
   : serve({
       port,
       routes: {
+        "/launch": handleRequest,
         "/fhir/*": handleRequest,
         "/api/*": handleRequest,
         "/cds-services": handleRequest,

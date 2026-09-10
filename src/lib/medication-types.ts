@@ -1,5 +1,6 @@
 /** Shared between the server (medications.ts, cds-hooks.ts) and the client — no DOM/Bun-specific APIs here. */
 import type { MedicationCategoryGroup, CdsRuleSeverity } from "./medication-config";
+import type { CopdMedicationClass, MedicationTherapyRole } from "./copd-medication-catalog";
 
 export type MonitoringStatus = "current" | "overdue" | "unavailable" | "insufficient-information";
 
@@ -33,6 +34,14 @@ export interface MedicationRegimenItem {
   monitoring: MonitoringStatusView[];
   priorPrescriptionId?: string;
   note?: string;
+  genericName?: string;
+  brandName?: string;
+  medicationClass?: CopdMedicationClass;
+  therapyRole?: MedicationTherapyRole;
+  reconciliationStatus?: "reconciled" | "needs-review" | "not-reviewed";
+  discrepancyType?: string;
+  openIssueCount?: number;
+  openTaskCount?: number;
 }
 
 export interface ReconciliationIssueView {

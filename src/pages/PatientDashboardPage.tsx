@@ -8,6 +8,7 @@ import { PatientSubNav } from "@/components/patients/PatientSubNav";
 import { CopdOverview } from "@/components/patient-overview/CopdOverview";
 import { CreateTaskDialog } from "@/components/clinical/CreateTaskDialog";
 import { getPatient, getPatientConditions, getPatientDiagnosticReports, getPatientMedicationAdministrations, getPatientMedicationRequests, getPatientMedicationStatements, getPatientEncounters, getPatientDetectedIssues, getPatientDocumentReferences, getPatientServiceRequests, getPatientImmunizations, getPatientObservations, getPatientTasks } from "@/lib/fhir";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 interface SectionState<T> { data: T; failed: boolean; }
 interface DashboardData {
@@ -32,6 +33,7 @@ function fromSettled<T>(result: PromiseSettledResult<T[]>): SectionState<T[]> {
 
 export function PatientDashboardPage() {
   const { patientId } = useParams<{ patientId: string }>();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -40,7 +42,7 @@ export function PatientDashboardPage() {
   const [reloadKey, setReloadKey] = useState(0);
 
   const load = useCallback(async () => {
-    if (!patientId) return;
+    if (!patientId || user?.mode === "ehr") return;
     setLoading(true); setError(null);
     try {
       const patient = await getPatient(patientId);
@@ -50,9 +52,11 @@ export function PatientDashboardPage() {
       setData({ patient, conditions: fromSettled(conditions), observations: fromSettled(observations), medicationRequests: fromSettled(medicationRequests), medicationAdministrations: fromSettled(medicationAdministrations), diagnosticReports: fromSettled(diagnosticReports), tasks: fromSettled(tasks), encounters: fromSettled(encounters), medicationStatements: fromSettled(medicationStatements), detectedIssues: fromSettled(detectedIssues), documentReferences: fromSettled(documentReferences), serviceRequests: fromSettled(serviceRequests), immunizations: fromSettled(immunizations) });
     } catch (err) { setError(err instanceof Error ? err.message : "Unable to load patient"); }
     finally { setLoading(false); }
-  }, [patientId]);
+  }, [patientId, user?.mode]);
 
   useEffect(() => { load(); }, [load, reloadKey]);
+
+  if (user?.mode === "ehr") return <AppShell title="Current EHR Patient" subtitle="Oracle patient context is active"><Alert variant="warning"><AlertDescription>EHR patient context is preserved, but the documented Medblocks downstream FHIR record adapter is not configured in this deployment. Demo FHIR data will not be used.</AlertDescription></Alert></AppShell>;
 
   if (loading) return <AppShell title="Patient dashboard"><p className="text-sm text-muted-foreground">Loading patient...</p></AppShell>;
   if (error || !data) return <AppShell title="Patient dashboard"><Alert variant="destructive"><AlertDescription>{error ?? "Unable to load patient."}</AlertDescription></Alert></AppShell>;

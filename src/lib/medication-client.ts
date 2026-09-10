@@ -62,10 +62,13 @@ export interface CreateStatementInput {
   status: fhir4.MedicationStatement["status"];
   doseText?: string;
   note?: string;
+  reportedUse?: string;
 }
 
-export function createMedicationStatement(patientId: string, input: CreateStatementInput): Promise<{ id: string }> {
-  return medFetch(`/api/patients/${encodeURIComponent(patientId)}/medication-statements`, { method: "POST", body: input });
+export async function createMedicationStatement(patientId: string, input: CreateStatementInput): Promise<{ id: string; cdsWarning?: string }> {
+  const result = await medFetch<{ id: string; cdsWarning?: string }>(`/api/patients/${encodeURIComponent(patientId)}/medication-statements`, { method: "POST", body: input });
+  window.dispatchEvent(new Event("waypoint:medication-reconciled"));
+  return result;
 }
 
 export interface SymptomAnswerInput {
